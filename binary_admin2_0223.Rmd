@@ -1,0 +1,99 @@
+---
+title: "binary_admin_2"
+author: "Qianyu Dong"
+date: "2023-02-22"
+output: html_document
+---
+
+```{r, echo=FALSE,message=FALSE, warning= FALSE}
+library(dplyr)
+library(rgdal)
+options(warn=0)
+library(spdep)
+library(SUMMER)
+library(geosphere)
+library(stringr)
+library(tidyverse)
+#devtools::install_github("ropensci/rdhs")
+library(rdhs)
+library(Hmisc)
+library(labelled)
+```
+
+```{r}
+births <- readRDS("~/Library/Caches/rdhs/datasets/ZMBR71DT.rds")
+raw.dat.tmp<-births
+
+ raw.dat.tmp<-births
+  strat <- attr(raw.dat.tmp$v025,which='labels')
+  names(strat) <- tolower(names(strat))
+  raw.dat.tmp$v025 <- ifelse(raw.dat.tmp$v025 == strat["urban"][[1]],'urban','rural')
+  raw.dat.tmp$v025 <- factor(raw.dat.tmp$v025, levels = c('urban','rural'))
+  raw.dat.tmp$v024 <- factor(unlabelled(raw.dat.tmp$v024))
+  
+  
+  mapfilename0 <- "/Users/qianyu/Documents/bayes/space-time/pipeline/Data/Zambia/2018/dhsFlat/ZMGE71FL/ZMGE71FL.shp"
+  geo0 <- readOGR(mapfilename0, verbose = FALSE)
+  points<-geo0
+
+    # detect points in the DHS GPS file with mis-specified coordinates and remove them if any
+    wrong.points <- which(points@data$LATNUM == 0.0 & points@data$LONGNUM == 0.0)
+    if(!is.null(dim(wrong.points))){message("There are wrong GPS points: (Longitude, Latitude) = (0, 0)")}
+
+    # remove wrong points in the data if any
+    dat.tmp <- dat.tmp[!(dat.tmp$v001 %in% points@data$DHSCLUST[wrong.points]),]
+    points@data$DHSCLUST[wrong.points] %in% unique(dat.tmp$v001)
+
+    # add the column for GPS coordinate in the data
+   dat.tmp$LONGNUM <- dat.tmp$LATNUM <- NA
+    for(i in 1:dim(points)[1]){
+     dat.tmp$LATNUM[dat.tmp$v001 == points@data$DHSCLUST[i]] <- points@data$LATNUM[i] # assign latitude to DHS cluster location
+     dat.tmp$LONGNUM[dat.tmp$v001 == points@data$DHSCLUST[i]] <- points@data$LONGNUM[i] # assign longitude to DHS cluster location
+   }
+
+   # remove missing points in the data if any
+   miss <- which(dat.tmp$LATNUM == 0 & dat.tmp$LONGNUM == 0)
+    if(length(miss != 0)){
+      dat.tmp <- dat.tmp[-miss,]
+    }
+
+    message("\n Assigned LAT & LONG")
+
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+
+   dat.tmp<-  raw.dat.tmp %>%
+    filter( b19<=60)%>%
+   dplyr::select(c(cluster="v001", region="v024", weight="v005", strata="v025",
+            Antenatal="m14")) %>%
+    mutate(Antenatal = ifelse(Antenatal>3 &  Antenatal<98,1,0)) %>%
+    group_by(cluster) %>%
+    mutate(Antenatal = sum(Antenatal,na.rm = t)) %>%
+    mutate(n = length(cluster)) %>%
+     ungroup()%>%
+    distinct( cluster, .keep_all = TRUE)
+ 
+# hist(dat.tmp$Antenatal,main = "Numbers of Antenatal visits>4 in each cluster")
+ 
+  
+```
+
+
+```{r}
+
+country <- 'Zambia'
+home.dir<-"/Users/qianyu/Documents/bayes/space-time/UN-Subnational-Estimates-main_old"
+res.dir <- paste0(home.dir,'/Results/',country) 
+setwd(paste0(res.dir,'/UR'))
+weight.strata.adm1.u1 <- readRDS(paste0('U1_fraction/','admin1_u1_urban_weights.rds'))
+weight.strata.adm1.u1_2012<-weight.strata.adm1.u1[121:130,]
+```
+

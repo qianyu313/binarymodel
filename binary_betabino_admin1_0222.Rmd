@@ -1,0 +1,439 @@
+---
+title: "binary_model_admin1"
+author: "Qianyu Dong"
+date: "2023-02-22"
+output: html_document
+---
+```{r, echo=FALSE,message=FALSE, warning= FALSE}
+library(dplyr)
+library(rgdal)
+options(warn=0)
+library(spdep)
+library(SUMMER)
+library(geosphere)
+library(stringr)
+library(tidyverse)
+#devtools::install_github("ropensci/rdhs")
+library(rdhs)
+library(Hmisc)
+library(labelled)
+library(INLA)
+```
+
+
+
+
+
+```{r}
+births <- readRDS("~/Library/Caches/rdhs/datasets/ZMBR71DT.rds")
+raw.dat.tmp<-births
+
+ raw.dat.tmp<-births
+  strat <- attr(raw.dat.tmp$v025,which='labels')
+  names(strat) <- tolower(names(strat))
+  raw.dat.tmp$v025 <- ifelse(raw.dat.tmp$v025 == strat["urban"][[1]],'urban','rural')
+  raw.dat.tmp$v025 <- factor(raw.dat.tmp$v025, levels = c('urban','rural'))
+  raw.dat.tmp$v024 <- factor(unlabelled(raw.dat.tmp$v024))
+  
+
+   dat.tmp<-  raw.dat.tmp %>%
+    filter( b19<=60)%>%
+   dplyr::select(c(cluster="v001", region="v024", weight="v005", strata="v025",
+            Antenatal="m14")) %>%
+    mutate(Antenatal = ifelse(Antenatal>3 &  Antenatal<98,1,0)) %>%
+    group_by(cluster) %>%
+    mutate(Antenatal = sum(Antenatal,na.rm = t)) %>%
+    mutate(n = length(cluster)) %>%
+     ungroup()%>%
+    distinct( cluster, .keep_all = TRUE)
+ 
+ hist(dat.tmp$Antenatal,main = "Numbers of Antenatal visits>4 in each cluster")
+ 
+  
+```
+
+
+
+
+```{r}
+
+country <- 'Zambia'
+home.dir<-"/Users/qianyu/Documents/bayes/space-time/UN-Subnational-Estimates-main_old"
+res.dir <- paste0(home.dir,'/Results/',country) 
+setwd(paste0(res.dir,'/UR'))
+weight.strata.adm1.u1 <- readRDS(paste0('U1_fraction/','admin1_u1_urban_weights.rds'))
+weight.strata.adm1.u1_2018<-weight.strata.adm1.u1[181:190,]
+```
+
+
+```{r}
+poly.adm1<-readRDS(file = "/Users/qianyu/Documents/bayes/space-time/binarymodel/data/poly.adm1.rds")
+admin1.mat <- poly2nb(SpatialPolygons(poly.adm1@polygons))
+admin1.mat <- nb2mat(admin1.mat, zero.policy = TRUE)
+
+```
+
+
+# admin-1 plots
+
+```{r , fig.show="hold", out.width="50%"}
+
+par(mar = c(4, 4, .1, .1))
+
+
+  dat.tmp_tem<-  dat.tmp %>%
+      group_by(region) %>%
+      summarise(Antenatal = sum(Antenatal,na.rm = t))
+
+ poly.adm1<-readRDS(file = "/Users/qianyu/Documents/bayes/space-time/binarymodel/data/poly.adm1.rds")
+ dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal=dat.tmp_tem$Antenatal,variables=rep("Antenatal",10)))
+ dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+   
+  mapPlot(dat.tmp_tem,
+          values = "Antenatal",
+          variables= "variables",
+          by.data = "region",
+          geo =poly.adm1,
+          by.geo = "NAME_1",is.long = TRUE)
+  
+  
+  dat.tmp_tem<-  dat.tmp %>%
+      group_by(region) %>%
+      summarise(n = sum(n,na.rm = t))
+  
+dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,n=dat.tmp_tem$n,variables=rep("n",10)))
+ dat.tmp_tem$n<-as.numeric ( dat.tmp_tem$n)
+   
+  mapPlot(dat.tmp_tem,
+          values = "n",
+          variables= "variables",
+          by.data = "region",
+          geo =poly.adm1,
+          by.geo = "NAME_1",is.long = TRUE)
+  
+
+```
+
+
+
+# admin-1 direct&smoothed_direct
+
+
+
+```{r}
+
+   bino.dat.tmp<-  raw.dat.tmp %>%
+    filter( b19<=60)%>%
+  dplyr::  select(c(cluster="v001", householdID= "v001",region="v024", weight="v005", strata="v025",
+             Antenatal="m14")) %>%
+    mutate(Antenatal = ifelse(Antenatal>3 &  Antenatal<98,1,0))
+
+   admin1.mat <- poly2nb(SpatialPolygons(poly.adm1@polygons))
+   admin1.mat <- nb2mat(admin1.mat, zero.policy = TRUE)
+   colnames(admin1.mat) <- rownames(admin1.mat) <-  levels(as.factor(dat.tmp$region))
+   bino.dat.tmp<- bino.dat.tmp%>% drop_na()
+   
+   
+   fit1<-smoothSurvey(as.data.frame(bino.dat.tmp),
+            responseType = c("binary", "gaussian")[1],
+            responseVar= "Antenatal",
+            regionVar = "region",
+            clusterVar = "~cluster+householdID",
+            weightVar = "weight",
+            strataVar = "strata",
+            Amat =admin1.mat,
+            CI = 0.95)
+
+   
+```
+
+```{r}
+  fit1$HT
+```
+```{r HT, fig.show="hold", out.width="50%"}
+dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal_HT= fit1$HT[,2],variables=rep("direct",10)))
+dat.tmp_tem$Antenatal_HT<-as.numeric ( dat.tmp_tem$Antenatal_HT)
+   
+  mapPlot(dat.tmp_tem,
+          values = "Antenatal_HT",
+          variables= "variables",
+          by.data = "region",
+          geo =poly.adm1,
+          by.geo = "NAME_1",is.long = TRUE)
+  
+  
+  dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal_HT= fit1$HT[,3],variables=rep("var",10)))
+dat.tmp_tem$Antenatal_HT<-as.numeric ( dat.tmp_tem$Antenatal_HT)
+   
+  mapPlot(dat.tmp_tem,
+          values = "Antenatal_HT",
+          variables= "variables",
+          by.data = "region",
+          geo =poly.adm1,
+          by.geo = "NAME_1",is.long = TRUE)
+```
+
+
+
+```{r}
+  fit1$smooth
+```
+
+
+```{r smooth, fig.show="hold", out.width="50%"}
+dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal_HT= fit1$smooth[,2],variables=rep("smooth",10)))
+dat.tmp_tem$Antenatal_HT<-as.numeric ( dat.tmp_tem$Antenatal_HT)
+   
+  mapPlot(dat.tmp_tem,
+          values = "Antenatal_HT",
+          variables= "variables",
+          by.data = "region",
+          geo =poly.adm1,
+          by.geo = "NAME_1",is.long = TRUE)
+  
+  
+  dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal_HT= fit1$smooth[,3],variables=rep("var",10)))
+dat.tmp_tem$Antenatal_HT<-as.numeric ( dat.tmp_tem$Antenatal_HT)
+   
+  mapPlot(dat.tmp_tem,
+          values = "Antenatal_HT",
+          variables= "variables",
+          by.data = "region",
+          geo =poly.adm1,
+          by.geo = "NAME_1",is.long = TRUE)
+```
+
+
+
+
+
+# admin-1 model 
+
+
+
+```{r}
+c.dat.tmp.birth<-dat.tmp
+c.dat.tmp.birth$ID<-1:dim(c.dat.tmp.birth)[1]
+c.dat.tmp.birth$sID<-as.numeric(c.dat.tmp.birth$region)
+ # to save results  
+# c.dat.tmp.birth<-c.dat.tmp.birth%>%add_row(head(c.dat.tmp.birth,10))
+# c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-9):dim(c.dat.tmp.birth)[1],2]<-rep(unique(c.dat.tmp.birth$region),1)
+# c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-9):dim(c.dat.tmp.birth)[1],8]<- c(1:10)
+# c.dat.tmp.birth[546:555,c(1,2:7)]<-NA
+
+c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]+1):(dim(c.dat.tmp.birth)[1]+10),2]<-rep(unique(c.dat.tmp.birth$region),1)
+ c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-9):(dim(c.dat.tmp.birth)[1]),8]<- c(1:10)
+
+
+formula <- Antenatal ~ 1+ f(sID, model = "iid")
+imod_0 <- inla(formula, family="betabinomial",data=c.dat.tmp.birth,Ntrials=n,control.predictor = list(compute=TRUE))
+tail(imod_0$summary.fitted.values,n=10)
+
+```
+
+
+```{r iid, fig.show="hold", out.width="50%"}
+dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,1],variables=rep("beta_bino",10)))
+dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+   
+  mapPlot(dat.tmp_tem,
+          values = "Antenatal",
+          variables= "variables",
+          by.data = "region",
+          geo =poly.adm1,
+          by.geo = "NAME_1",is.long = TRUE)
+  
+  
+dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,2],variables=rep("var",10)))
+dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+   
+  mapPlot(dat.tmp_tem,
+          values = "Antenatal",
+          variables= "variables",
+          by.data = "region",
+          geo =poly.adm1,
+          by.geo = "NAME_1",is.long = TRUE)
+  
+```
+
+
+
+
+# admin-1 model with bym
+
+
+
+```{r}
+c.dat.tmp.birth<-dat.tmp
+c.dat.tmp.birth$ID<-1:dim(c.dat.tmp.birth)[1]
+c.dat.tmp.birth$sID<-as.numeric(c.dat.tmp.birth$region)
+ # to save results  
+# c.dat.tmp.birth<-c.dat.tmp.birth%>%add_row(head(c.dat.tmp.birth,10))
+# c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-9):dim(c.dat.tmp.birth)[1],2]<-rep(unique(c.dat.tmp.birth$region),1)
+# c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-9):dim(c.dat.tmp.birth)[1],8]<- c(1:10)
+# c.dat.tmp.birth[546:555,c(1,2:7)]<-NA
+
+c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]+1):(dim(c.dat.tmp.birth)[1]+10),2]<-rep(unique(c.dat.tmp.birth$region),1)
+c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-9):(dim(c.dat.tmp.birth)[1]),8]<- c(1:10)
+
+
+formula <- Antenatal ~ 1+ f(sID, model = "bym2", graph = admin1.mat)
+imod_1 <- inla(formula, family="betabinomial",data=c.dat.tmp.birth,Ntrials=n,control.predictor = list(compute=TRUE))
+# tail(imod_1$summary.fitted.values)
+
+```
+
+
+```{r bym, fig.show="hold", out.width="50%"}
+dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1$summary.fitted.values,n=10)[,1],variables=rep("beta_bino",10)))
+dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+   
+  mapPlot(dat.tmp_tem,
+          values = "Antenatal",
+          variables= "variables",
+          by.data = "region",
+          geo =poly.adm1,
+          by.geo = "NAME_1",is.long = TRUE)
+  
+  
+dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,2],variables=rep("beta_bino",10)))
+dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+   
+  mapPlot(dat.tmp_tem,
+          values = "Antenatal",
+          variables= "variables",
+          by.data = "region",
+          geo =poly.adm1,
+          by.geo = "NAME_1",is.long = TRUE)
+  
+```
+
+
+
+# admin-1 model with strata
+
+```{r}
+
+
+c.dat.tmp.birth<-dat.tmp
+c.dat.tmp.birth$ID<-1:dim(c.dat.tmp.birth)[1]
+c.dat.tmp.birth$sID<-as.numeric(c.dat.tmp.birth$region)
+c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]+1):(dim(c.dat.tmp.birth)[1]+20),2]<-rep(unique(c.dat.tmp.birth$region),2)
+c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-19):(dim(c.dat.tmp.birth)[1]),8]<-  c(rep(1:10,2))
+c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-19):(dim(c.dat.tmp.birth)[1]),4]<-  c(rep("urban",10),rep("rural",10))
+
+formula <- Antenatal ~ 1+strata+ f(sID, model = "bym2", graph = admin1.mat)
+imod_1_strata <- inla(formula, family="betabinomial",data=c.dat.tmp.birth,Ntrials=n)
+
+tail(imod_1_strata$summary.fitted.values,n=20)[1:10,1]*weight.strata.adm1.u1_2018$urban
++tail(imod_1_strata$summary.fitted.values,n=20)[11:20,1]*weight.strata.adm1.u1_2018$rural
+
+  
+  
+# p_urban =rep(imod_1_strata$summary.fixed[1,1],545)+ bym+ imod$summary.random$ID[,2]
+
+```
+
+```{r}
+dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,
+                                  Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[1:10,1]*weight.strata.adm1.u1_2018$urban
++tail(imod_1_strata$summary.fitted.values,n=20)[11:20,1]*weight.strata.adm1.u1_2018$rural
+
+,variables=rep("strata",10)))
+dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+   
+  mapPlot(dat.tmp_tem,
+          values = "Antenatal",
+          variables= "variables",
+          by.data = "region",
+          geo =poly.adm1,
+          by.geo = "NAME_1",is.long = TRUE)
+  
+```
+
+
+
+
+
+
+
+```{r strata, fig.show="hold", out.width="50%"}
+dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[1:10,1],variables=rep("urban",10)))
+dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+   
+  mapPlot(dat.tmp_tem,
+          values = "Antenatal",
+          variables= "variables",
+          by.data = "region",
+          geo =poly.adm1,
+          by.geo = "NAME_1",is.long = TRUE)
+  
+  
+dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[1:10,2],variables=rep("var",10)))
+dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+   
+  mapPlot(dat.tmp_tem,
+          values = "Antenatal",
+          variables= "variables",
+          by.data = "region",
+          geo =poly.adm1,
+          by.geo = "NAME_1",is.long = TRUE)
+  
+  
+  
+  dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[11:20,1],variables=rep("rural",10)))
+dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+   
+  mapPlot(dat.tmp_tem,
+          values = "Antenatal",
+          variables= "variables",
+          by.data = "region",
+          geo =poly.adm1,
+          by.geo = "NAME_1",is.long = TRUE)
+  
+  
+dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[11:20,2],variables=rep("var",10)))
+dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+   
+  mapPlot(dat.tmp_tem,
+          values = "Antenatal",
+          variables= "variables",
+          by.data = "region",
+          geo =poly.adm1,
+          by.geo = "NAME_1",is.long = TRUE)
+  
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
