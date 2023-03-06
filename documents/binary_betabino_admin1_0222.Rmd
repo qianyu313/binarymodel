@@ -4,10 +4,9 @@ author: "Qianyu Dong"
 date: "2023-02-22"
 output: html_document
 ---
+
+
 ```{r, echo=FALSE,message=FALSE, warning= FALSE}
-
-
-
 library(dplyr)
 library(rgdal)
 options(warn=0)
@@ -21,7 +20,6 @@ library(rdhs)
 library(Hmisc)
 library(labelled)
 library(INLA)
-
 # libraries needed
 # library(tidyverse)  # most variable creation here uses tidyverse 
 # library(tidyselect) # used to select variables in FP_EVENTS.R
@@ -31,9 +29,6 @@ library(INLA)
 # library(xlsx)     # for exporting to excel
 library(naniar)   # to use replace_with_na function
 # library(here)       # to get R project path
-
-
-
 ```
 
 
