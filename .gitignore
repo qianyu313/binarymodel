@@ -1,2 +1,5 @@
 data
-Icon
+Icon
+
+documents/*_files
+*.html
