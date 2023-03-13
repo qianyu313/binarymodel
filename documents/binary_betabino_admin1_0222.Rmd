@@ -28,15 +28,17 @@ library(INLA)
 # library(expss)    # for creating tables with Haven labeled data
 # library(xlsx)     # for exporting to excel
 library(naniar)   # to use replace_with_na function
-# library(here)       # to get R project path
+library(here)       # to get R project path
+library(patchwork) # organize ggplot2 output nicely
 ```
 
 
 ```{r}
-children <- readRDS("~/Library/Caches/rdhs/datasets/ZMKR71DT.rds")
-births <- readRDS("~/Library/Caches/rdhs/datasets/ZMBR71DT.rds")
-individual <- readRDS("~/Library/Caches/rdhs/datasets/ZMIR71DT.rds")
-household <- readRDS("~/Library/Caches/rdhs/datasets/ZMHR71DT.rds")
+setwd(here())
+children <- readRDS(here("data/DHS_data/ZMKR71DT.rds"))
+births <- readRDS(here("data/DHS_data/ZMBR71DT.rds"))
+individual <- readRDS(here("data/DHS_data/ZMIR71DT.rds"))
+household <- readRDS(here("data/DHS_data/ZMHR71DT.rds"))
 ```
 
 
@@ -94,11 +96,9 @@ IRdata <- IRdata %>%
 
 ```
 
-
-
+Comment: the following reproduces the same as DHS code it seems? Then we should use the DHS codes and then modify `IRdata` object accordingly below (so that for future adaptation to other indicators we could just replace the top chunk.)
 
 ```{r}
-births <- readRDS("~/Library/Caches/rdhs/datasets/ZMBR71DT.rds")
 raw.dat.tmp<-individual
 
   strat <- attr(raw.dat.tmp$v025,which='labels')
@@ -131,152 +131,145 @@ raw.dat.tmp<-individual
 ```
 
 ```{r}
-table(dat.tmp$m14_1)
 table(dat.tmp$Antenatal)
 ```
 
 
 ```{r}
-
-country <- 'Zambia'
-home.dir<-"/Users/qianyu/Documents/bayes/space-time/UN-Subnational-Estimates-main_old"
-res.dir <- paste0(home.dir,'/Results/',country) 
-setwd(paste0(res.dir,'/UR'))
-weight.strata.adm1.u1 <- readRDS(paste0('U1_fraction/','admin1_u1_urban_weights.rds'))
-weight.strata.adm1.u1_2018<-weight.strata.adm1.u1[181:190,]
+weight.strata.adm1.u1 <- readRDS(here("data/UR/U1_fraction/admin1_u1_urban_weights.rds"))
+weight.strata.adm1.u1_2018<-subset(weight.strata.adm1.u1, years == 2018)
 ```
 
 
 ```{r}
-poly.adm1<-readRDS(file = "/Users/qianyu/Documents/bayes/space-time/binarymodel/data/poly.adm1.rds")
+poly.adm1<-readRDS(here("data/Geo/poly.adm1.rds"))
 admin1.mat <- poly2nb(SpatialPolygons(poly.adm1@polygons))
 admin1.mat <- nb2mat(admin1.mat, zero.policy = TRUE)
-
 ```
 
 
 # admin-1 plots
 
-```{r , fig.show="hold", out.width="50%"}
+Comment: The region name matching needs to be handled in a more systematic way. But here I created the lookup table interactively
+```{r}
+admin1_name_table <- data.frame(by.data = sort(unique(dat.tmp$region)), by.geo = sort(poly.adm1$NAME_1))
+admin1_name_table[7, 2] <- "Northern"
+admin1_name_table[8, 2] <- "North-Western"
+```
+
+```{r , fig.show="hold", out.width="100%"}
 
 par(mar = c(4, 4, .1, .1))
 
-  dat.tmp_tem<-  dat.tmp %>%
+dat.tmp.tem <- dat.tmp %>%
       group_by(region) %>%
-      summarise(Antenatal = sum(Antenatal,na.rm = t))
+      summarise(Total = sum(Antenatal > -1, na.rm = t), 
+                Antenatal = sum(Antenatal, na.rm = t),) %>%
+      mutate(Prop = Antenatal / Total) %>% as.data.frame()
 
- poly.adm1<-readRDS(file = "/Users/qianyu/Documents/bayes/space-time/binarymodel/data/poly.adm1.rds")
- dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal=dat.tmp_tem$Antenatal,variables=rep("Antenatal",10)))
- dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem$region <- admin1_name_table[match(dat.tmp.tem$region, admin1_name_table[,1]), 2]
    
-  mapPlot(dat.tmp_tem,
-          values = "Antenatal",
-          variables= "variables",
+g1 <- mapPlot(dat.tmp.tem,
+          variables = "Antenatal",
           by.data = "region",
-          geo =poly.adm1,
-          by.geo = "NAME_1",is.long = TRUE)
-  
-  
-  dat.tmp_tem<-  dat.tmp %>%
-      group_by(region) %>%
-      summarise(n = n())
-  
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,n=dat.tmp_tem$n,variables=rep("n",10)))
- dat.tmp_tem$n<-as.numeric ( dat.tmp_tem$n)
-   
-  mapPlot(dat.tmp_tem,
-          values = "n",
-          variables= "variables",
+          geo = poly.adm1,
+          by.geo = "NAME_1",
+          is.long = FALSE, 
+          legend.label = "Count")
+g2 <- mapPlot(dat.tmp.tem,
+          variables = "Total",
           by.data = "region",
-          geo =poly.adm1,
-          by.geo = "NAME_1",is.long = TRUE)
-  
+          geo = poly.adm1,
+          by.geo = "NAME_1",
+          is.long = FALSE, 
+          legend.label = "Total")
+g3 <- mapPlot(dat.tmp.tem,
+          variables = "Prop",
+          by.data = "region",
+          geo = poly.adm1,
+          by.geo = "NAME_1",
+          is.long = FALSE, 
+          legend.label = "Prop (unweighted)")
+g1 + g2 + g3    
 
 ```
 
 
 
-# admin-1 direct&smoothed_direct
+# Admin-1 direct and smoothed direct estimators
 
 
+Comment: in `smoothSurvey()`, the strata variable is the actual survey stratification variable, which is usually Admin1 crossed with U/R, instead of only the within-area stratification variable (U/R only).
+
+Comment: I make the names consistent in both the data and the polygon files to avoid changing the labels multiple times later.
 
 ```{r}
-
    bino.dat.tmp<-dat.tmp
+   bino.dat.tmp$strata.full <- paste(bino.dat.tmp$region, bino.dat.tmp$strata)
+   bino.dat.tmp$region <- admin1_name_table[match(bino.dat.tmp$region, admin1_name_table[,1]), 2]
 
    admin1.mat <- poly2nb(SpatialPolygons(poly.adm1@polygons))
    admin1.mat <- nb2mat(admin1.mat, zero.policy = TRUE)
-   colnames(admin1.mat) <- rownames(admin1.mat) <-  levels(as.factor(dat.tmp$region))
-   # bino.dat.tmp<- bino.dat.tmp%>% drop_na()
+   colnames(admin1.mat) <- rownames(admin1.mat) <-  poly.adm1$NAME_1
    
-   
-   fit1<-smoothSurvey(as.data.frame(bino.dat.tmp),
-            responseType = c("binary", "gaussian")[1],
+   fit1 <- smoothSurvey(as.data.frame(bino.dat.tmp),
+            responseType =  "binary",
             responseVar= "Antenatal",
             regionVar = "region",
             clusterVar = "~cluster+householdID",#+householdID same result
             weightVar = "weight",
-            strataVar = "strata",
+            strataVar = "strata.full",
             Amat =admin1.mat,
-            CI = 0.95)
-
-   
+            CI = 0.95)  
 ```
 
 ```{r}
   fit1$HT
 ```
-```{r HT, fig.show="hold", out.width="50%"}
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal_HT= fit1$HT[,2],variables=rep("direct",10)))
-dat.tmp_tem$Antenatal_HT<-as.numeric ( dat.tmp_tem$Antenatal_HT)
-   
-  mapPlot(dat.tmp_tem,
-          values = "Antenatal_HT",
-          variables= "variables",
-          by.data = "region",
-          geo =poly.adm1,
-          by.geo = "NAME_1",is.long = TRUE)
-  
-  
-  dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal_HT= fit1$HT[,3],variables=rep("var",10)))
-dat.tmp_tem$Antenatal_HT<-as.numeric ( dat.tmp_tem$Antenatal_HT)
-   
-  mapPlot(dat.tmp_tem,
-          values = "Antenatal_HT",
-          variables= "variables",
-          by.data = "region",
-          geo =poly.adm1,
-          by.geo = "NAME_1",is.long = TRUE)
-```
-
-
 
 ```{r}
   fit1$smooth
 ```
 
+```{r}
+fit1$HT$HT.sd <- sqrt(fit1$HT$HT.var)
+fit1$smooth$sd <- sqrt(fit1$smooth$var)
+ylim1 <- range(c(fit1$HT$HT.est, fit1$smooth$mean))
+ylim2 <- range(c(fit1$HT$HT.sd, fit1$smooth$sd))
+```
 
-```{r smooth, fig.show="hold", out.width="50%"}
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal_HT= fit1$smooth[,2],variables=rep("smooth",10)))
-dat.tmp_tem$Antenatal_HT<-as.numeric ( dat.tmp_tem$Antenatal_HT)
-   
-  mapPlot(dat.tmp_tem,
-          values = "Antenatal_HT",
-          variables= "variables",
+```{r HT, fig.show="hold", out.width="100%"}
+g1 <- mapPlot(fit1$HT,
+          variables = "HT.est",
           by.data = "region",
-          geo =poly.adm1,
-          by.geo = "NAME_1",is.long = TRUE)
-  
-  
-  dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal_HT= fit1$smooth[,3],variables=rep("var",10)))
-dat.tmp_tem$Antenatal_HT<-as.numeric ( dat.tmp_tem$Antenatal_HT)
-   
-  mapPlot(dat.tmp_tem,
-          values = "Antenatal_HT",
-          variables= "variables",
+          geo = poly.adm1,
+          by.geo = "NAME_1",
+          legend.label = "HT estimator", 
+          ylim = ylim1)
+g2 <- mapPlot(fit1$HT,
+          variables = "HT.sd",
           by.data = "region",
-          geo =poly.adm1,
-          by.geo = "NAME_1",is.long = TRUE)
+          geo = poly.adm1,
+          by.geo = "NAME_1",
+          legend.label = "HT SE", 
+          ylim = ylim2)
+
+g3 <- mapPlot(fit1$smooth,
+          variables = "mean",
+          by.data = "region",
+          geo = poly.adm1,
+          by.geo = "NAME_1",
+          legend.label = "Smooth Direct estimator", 
+          ylim = ylim1)
+
+g4 <- mapPlot(fit1$smooth,
+          variables = "sd",
+          by.data = "region",
+          geo = poly.adm1,
+          by.geo = "NAME_1",
+          legend.label = "Smooth Direct SE", 
+          ylim = ylim2)
+(g1 + g2)/(g3 + g4)
 ```
 
 
@@ -318,10 +311,10 @@ tail(imod_0$summary.fitted.values,n=10)
 
 
 ```{r iid, fig.show="hold", out.width="50%"}
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,1],variables=rep("beta_bino",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,1],variables=rep("beta_bino",10)))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -329,10 +322,10 @@ dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
           by.geo = "NAME_1",is.long = TRUE)
   
   
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,2],variables=rep("var",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,2],variables=rep("var",10)))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -344,7 +337,7 @@ dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
 
 
 
-# admin-1 model with bym
+# Admin-1 Beta-Binomial model
 
 
 
@@ -369,10 +362,10 @@ imod_1 <- inla(formula, family="betabinomial",data=c.dat.tmp.birth,Ntrials=n,con
 
 
 ```{r bym, fig.show="hold", out.width="50%"}
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1$summary.fitted.values,n=10)[,1],variables=rep("beta_bino",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1$summary.fitted.values,n=10)[,1],variables=rep("beta_bino",10)))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -380,10 +373,10 @@ dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
           by.geo = "NAME_1",is.long = TRUE)
   
   
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,2],variables=rep("beta_bino",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,2],variables=rep("beta_bino",10)))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -419,14 +412,14 @@ tail(imod_1_strata$summary.fitted.values,n=20)[1:10,1]*weight.strata.adm1.u1_201
 ```
 
 ```{r}
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,
                                   Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[1:10,1]*weight.strata.adm1.u1_2018$urban
 +tail(imod_1_strata$summary.fitted.values,n=20)[11:20,1]*weight.strata.adm1.u1_2018$rural
 
 ,variables=rep("strata",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -442,10 +435,10 @@ dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
 
 
 ```{r strata, fig.show="hold", out.width="50%"}
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[1:10,1],variables=rep("urban",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[1:10,1],variables=rep("urban",10)))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -453,10 +446,10 @@ dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
           by.geo = "NAME_1",is.long = TRUE)
   
   
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[1:10,2],variables=rep("var",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[1:10,2],variables=rep("var",10)))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -465,10 +458,10 @@ dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
   
   
   
-  dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[11:20,1],variables=rep("rural",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+  dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[11:20,1],variables=rep("rural",10)))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -476,10 +469,10 @@ dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
           by.geo = "NAME_1",is.long = TRUE)
   
   
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[11:20,2],variables=rep("var",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[11:20,2],variables=rep("var",10)))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -518,7 +511,7 @@ dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
 
 
 
-
+<!-- 
 
 
 ---
@@ -689,15 +682,15 @@ admin1.mat <- nb2mat(admin1.mat, zero.policy = TRUE)
 
 par(mar = c(4, 4, .1, .1))
 
-  dat.tmp_tem<-  dat.tmp %>%
+  dat.tmp.tem<-  dat.tmp %>%
       group_by(region) %>%
       summarise(Antenatal = sum(Antenatal,na.rm = t))
 
  poly.adm1<-readRDS(file = "/Users/qianyu/Documents/bayes/space-time/binarymodel/data/poly.adm1.rds")
- dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal=dat.tmp_tem$Antenatal,variables=rep("Antenatal",10)))
- dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+ dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal=dat.tmp.tem$Antenatal,variables=rep("Antenatal",10)))
+ dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -705,14 +698,14 @@ par(mar = c(4, 4, .1, .1))
           by.geo = "NAME_1",is.long = TRUE)
   
   
-  dat.tmp_tem<-  dat.tmp %>%
+  dat.tmp.tem<-  dat.tmp %>%
       group_by(region) %>%
       summarise(n = n())
   
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,n=dat.tmp_tem$n,variables=rep("n",10)))
- dat.tmp_tem$n<-as.numeric ( dat.tmp_tem$n)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,n=dat.tmp.tem$n,variables=rep("n",10)))
+ dat.tmp.tem$n<-as.numeric ( dat.tmp.tem$n)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "n",
           variables= "variables",
           by.data = "region",
@@ -755,10 +748,10 @@ dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,n=dat.tmp_tem$n,variab
   fit1$HT
 ```
 ```{r HT, fig.show="hold", out.width="50%"}
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal_HT= fit1$HT[,2],variables=rep("direct",10)))
-dat.tmp_tem$Antenatal_HT<-as.numeric ( dat.tmp_tem$Antenatal_HT)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal_HT= fit1$HT[,2],variables=rep("direct",10)))
+dat.tmp.tem$Antenatal_HT<-as.numeric ( dat.tmp.tem$Antenatal_HT)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal_HT",
           variables= "variables",
           by.data = "region",
@@ -766,10 +759,10 @@ dat.tmp_tem$Antenatal_HT<-as.numeric ( dat.tmp_tem$Antenatal_HT)
           by.geo = "NAME_1",is.long = TRUE)
   
   
-  dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal_HT= fit1$HT[,3],variables=rep("var",10)))
-dat.tmp_tem$Antenatal_HT<-as.numeric ( dat.tmp_tem$Antenatal_HT)
+  dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal_HT= fit1$HT[,3],variables=rep("var",10)))
+dat.tmp.tem$Antenatal_HT<-as.numeric ( dat.tmp.tem$Antenatal_HT)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal_HT",
           variables= "variables",
           by.data = "region",
@@ -785,10 +778,10 @@ dat.tmp_tem$Antenatal_HT<-as.numeric ( dat.tmp_tem$Antenatal_HT)
 
 
 ```{r smooth, fig.show="hold", out.width="50%"}
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal_HT= fit1$smooth[,2],variables=rep("smooth",10)))
-dat.tmp_tem$Antenatal_HT<-as.numeric ( dat.tmp_tem$Antenatal_HT)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal_HT= fit1$smooth[,2],variables=rep("smooth",10)))
+dat.tmp.tem$Antenatal_HT<-as.numeric ( dat.tmp.tem$Antenatal_HT)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal_HT",
           variables= "variables",
           by.data = "region",
@@ -796,10 +789,10 @@ dat.tmp_tem$Antenatal_HT<-as.numeric ( dat.tmp_tem$Antenatal_HT)
           by.geo = "NAME_1",is.long = TRUE)
   
   
-  dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal_HT= fit1$smooth[,3],variables=rep("var",10)))
-dat.tmp_tem$Antenatal_HT<-as.numeric ( dat.tmp_tem$Antenatal_HT)
+  dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal_HT= fit1$smooth[,3],variables=rep("var",10)))
+dat.tmp.tem$Antenatal_HT<-as.numeric ( dat.tmp.tem$Antenatal_HT)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal_HT",
           variables= "variables",
           by.data = "region",
@@ -846,10 +839,10 @@ tail(imod_0$summary.fitted.values,n=10)
 
 
 ```{r iid, fig.show="hold", out.width="50%"}
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,1],variables=rep("beta_bino",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,1],variables=rep("beta_bino",10)))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -857,10 +850,10 @@ dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
           by.geo = "NAME_1",is.long = TRUE)
   
   
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,2],variables=rep("var",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,2],variables=rep("var",10)))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -897,10 +890,10 @@ imod_1 <- inla(formula, family="betabinomial",data=c.dat.tmp.birth,Ntrials=n,con
 
 
 ```{r bym, fig.show="hold", out.width="50%"}
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1$summary.fitted.values,n=10)[,1],variables=rep("beta_bino",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1$summary.fitted.values,n=10)[,1],variables=rep("beta_bino",10)))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -908,10 +901,10 @@ dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
           by.geo = "NAME_1",is.long = TRUE)
   
   
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,2],variables=rep("beta_bino",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,2],variables=rep("beta_bino",10)))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -947,14 +940,14 @@ tail(imod_1_strata$summary.fitted.values,n=20)[1:10,1]*weight.strata.adm1.u1_201
 ```
 
 ```{r}
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,
                                   Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[1:10,1]*weight.strata.adm1.u1_2018$urban
 +tail(imod_1_strata$summary.fitted.values,n=20)[11:20,1]*weight.strata.adm1.u1_2018$rural
 
 ,variables=rep("strata",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -970,10 +963,10 @@ dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
 
 
 ```{r strata, fig.show="hold", out.width="50%"}
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[1:10,1],variables=rep("urban",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[1:10,1],variables=rep("urban",10)))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -981,10 +974,10 @@ dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
           by.geo = "NAME_1",is.long = TRUE)
   
   
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[1:10,2],variables=rep("var",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[1:10,2],variables=rep("var",10)))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -993,10 +986,10 @@ dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
   
   
   
-  dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[11:20,1],variables=rep("rural",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+  dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[11:20,1],variables=rep("rural",10)))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -1004,10 +997,10 @@ dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
           by.geo = "NAME_1",is.long = TRUE)
   
   
-dat.tmp_tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[11:20,2],variables=rep("var",10)))
-dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1_strata$summary.fitted.values,n=20)[11:20,2],variables=rep("var",10)))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp_tem,
+  mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "variables",
           by.data = "region",
@@ -1018,7 +1011,7 @@ dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
 
 
 
-
+ -->
 
 
 
