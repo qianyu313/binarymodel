@@ -155,6 +155,7 @@ Comment: The region name matching needs to be handled in a more systematic way. 
 admin1_name_table <- data.frame(by.data = sort(unique(dat.tmp$region)), by.geo = sort(poly.adm1$NAME_1))
 admin1_name_table[7, 2] <- "Northern"
 admin1_name_table[8, 2] <- "North-Western"
+admin1_name_table$sID <- match(admin1_name_table[, 2], poly.adm1$NAME_1)
 ```
 
 ```{r , fig.show="hold", out.width="100%"}
@@ -198,6 +199,7 @@ g1 + g2 + g3
 
 # Admin-1 direct and smoothed direct estimators
 
+Comment: copy down the model specifications here.
 
 Comment: in `smoothSurvey()`, the strata variable is the actual survey stratification variable, which is usually Admin1 crossed with U/R, instead of only the within-area stratification variable (U/R only).
 
@@ -276,137 +278,153 @@ g4 <- mapPlot(fit1$smooth,
 
 
 
-# admin-1 model 
+# admin-1 Beta-Binomial model with IID space effect
+
+Comment: copy down the model specifications here.
+
+Comment: `c.dat.tmp.birth` object name is probably too long and not clear what it is...
 
 ```{r}
 
-   dat.tmp<- dat.tmp %>%
+   c.dat.tmp.birth <- dat.tmp %>%
     group_by(cluster) %>%
-    mutate(Antenatal = sum(Antenatal,na.rm = t)) %>%
     mutate(n = length(cluster)) %>%
-     ungroup()%>%
+    mutate(Antenatal = sum(Antenatal,na.rm = T)) %>%
+    ungroup()%>%
     distinct( cluster, .keep_all = TRUE)
 ```
 
 
+Comment: I matched on the lookup table to make sure sID correspond to the same order as in the adjacency matrix.
+
+Comment: updated prior to be PC prior.
+
 ```{r}
-c.dat.tmp.birth<-dat.tmp
-c.dat.tmp.birth$ID<-1:dim(c.dat.tmp.birth)[1]
-c.dat.tmp.birth$sID<-as.numeric(c.dat.tmp.birth$region)
- # to save results  
-# c.dat.tmp.birth<-c.dat.tmp.birth%>%add_row(head(c.dat.tmp.birth,10))
-# c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-9):dim(c.dat.tmp.birth)[1],2]<-rep(unique(c.dat.tmp.birth$region),1)
-# c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-9):dim(c.dat.tmp.birth)[1],8]<- c(1:10)
-# c.dat.tmp.birth[546:555,c(1,2:7)]<-NA
+nregion <- dim(admin1_name_table)[1]
+# add new rows corresponding to each region
+c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]+1):(dim(c.dat.tmp.birth)[1]+nregion),"region"] <- admin1_name_table[,1]
 
-c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]+1):(dim(c.dat.tmp.birth)[1]+10),"region"]<-rep(unique(c.dat.tmp.birth$region),1)
-c.dat.tmp.birth$sID<-as.numeric(c.dat.tmp.birth$region)
+c.dat.tmp.birth$ID <- 1:dim(c.dat.tmp.birth)[1]
+c.dat.tmp.birth$sID <- admin1_name_table$sID[match(c.dat.tmp.birth$region, admin1_name_table[,1])]
 
-
-formula <- Antenatal ~ 1+ f(sID, model = "iid")
-imod_0 <- inla(formula, family="betabinomial",data=c.dat.tmp.birth,Ntrials=n,control.predictor = list(compute=TRUE))
-tail(imod_0$summary.fitted.values,n=10)
+pc.u = 1
+pc.alpha = 0.01
+formula <- Antenatal ~ 1 + f(sID, model = "iid", hyper = list(prec = list(prior = "pc.prec", param = c(pc.u , pc.alpha))))
+imod_0 <- inla(formula, 
+               family="betabinomial",
+               data=c.dat.tmp.birth,
+               Ntrials=n,
+               control.predictor = list(compute=TRUE, link = 1))
+tail(imod_0$summary.fitted.values,n=nregion)
 
 ```
 
 
 ```{r iid, fig.show="hold", out.width="50%"}
-dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,1],variables=rep("beta_bino",10)))
+dat.tmp.tem <- as.data.frame(cbind(
+  region=poly.adm1$NAME_1,
+  Antenatal= tail(imod_0$summary.fitted.values,n=nregion)[,1]))
 dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp.tem,
-          values = "Antenatal",
-          variables= "variables",
+mapPlot(dat.tmp.tem,
+          variables = "Antenatal",
           by.data = "region",
-          geo =poly.adm1,
-          by.geo = "NAME_1",is.long = TRUE)
+          geo = poly.adm1,
+          by.geo = "NAME_1", 
+          legend.label = "BB (iid)")
   
   
-dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,2],variables=rep("var",10)))
+dat.tmp.tem<- as.data.frame(cbind(
+        region=poly.adm1$NAME_1,
+        Antenatal= tail(imod_0$summary.fitted.values,n=nregion)[,2]))
 dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp.tem,
-          values = "Antenatal",
-          variables= "variables",
+mapPlot(dat.tmp.tem,
+          variables = "Antenatal",
           by.data = "region",
           geo =poly.adm1,
-          by.geo = "NAME_1",is.long = TRUE)
+          by.geo = "NAME_1",
+          legend.label = "SD BB (iid)")
   
 ```
 
 
 
 
-# Admin-1 Beta-Binomial model
+# Admin-1 Beta-Binomial model with BYM2 spatial effect
 
 
+Comment: I use the same dataset as before to avoid copy pasting errors.
 
 ```{r}
-c.dat.tmp.birth<-dat.tmp
-c.dat.tmp.birth$ID<-1:dim(c.dat.tmp.birth)[1]
-c.dat.tmp.birth$sID<-as.numeric(c.dat.tmp.birth$region)
- # to save results  
-# c.dat.tmp.birth<-c.dat.tmp.birth%>%add_row(head(c.dat.tmp.birth,10))
-# c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-9):dim(c.dat.tmp.birth)[1],2]<-rep(unique(c.dat.tmp.birth$region),1)
-# c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-9):dim(c.dat.tmp.birth)[1],8]<- c(1:10)
-# c.dat.tmp.birth[546:555,c(1,2:7)]<-NA
-
-c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]+1):(dim(c.dat.tmp.birth)[1]+10),"region"]<-rep(unique(c.dat.tmp.birth$region),1)
-c.dat.tmp.birth$sID<-as.numeric(c.dat.tmp.birth$region)
-
-formula <- Antenatal ~ 1+ f(sID, model = "bym2", graph = admin1.mat)
-imod_1 <- inla(formula, family="betabinomial",data=c.dat.tmp.birth,Ntrials=n,control.predictor = list(compute=TRUE))
-# tail(imod_1$summary.fitted.values)
-
+formula <- Antenatal ~ 1+ f(sID, model = "bym2", graph = admin1.mat, scale.model = TRUE, hyper = list(prec = list(prior = "pc.prec", param = c(pc.u , pc.alpha))))
+imod_1 <- inla(formula, 
+               family="betabinomial",
+               data=c.dat.tmp.birth,
+               Ntrials=n,
+               control.predictor = list(compute=TRUE, link = 1))
 ```
 
 
 ```{r bym, fig.show="hold", out.width="50%"}
-dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_1$summary.fitted.values,n=10)[,1],variables=rep("beta_bino",10)))
+dat.tmp.tem<- as.data.frame(cbind(
+                  region=poly.adm1$NAME_1,
+                  Antenatal= tail(imod_1$summary.fitted.values,n=nregion)[,1]))
 dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp.tem,
-          values = "Antenatal",
-          variables= "variables",
+mapPlot(dat.tmp.tem,
+          variables = "Antenatal",
           by.data = "region",
-          geo =poly.adm1,
-          by.geo = "NAME_1",is.long = TRUE)
+          geo = poly.adm1,
+          by.geo = "NAME_1", 
+          legend.label = "BB (BYM2)")
   
   
-dat.tmp.tem<- as.data.frame(cbind(region=poly.adm1$NAME_1,Antenatal= tail(imod_0$summary.fitted.values,n=10)[,2],variables=rep("beta_bino",10)))
+dat.tmp.tem<- as.data.frame(cbind(
+        region=poly.adm1$NAME_1,
+        Antenatal= tail(imod_1$summary.fitted.values,n=nregion)[,2]))
 dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
-  mapPlot(dat.tmp.tem,
-          values = "Antenatal",
-          variables= "variables",
+mapPlot(dat.tmp.tem,
+          variables = "Antenatal",
           by.data = "region",
           geo =poly.adm1,
-          by.geo = "NAME_1",is.long = TRUE)
-  
+          by.geo = "NAME_1",
+          legend.label = "SD BB (BYM2)")
 ```
 
 
 
 # admin-1 model with strata
 
+Comment: copy down the model specifications here maybe?
+
+Comment: I also removed repeated data generating steps and built from previous data frame.
+
 ```{r}
 
+c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-nregion+1):(dim(c.dat.tmp.birth)[1]),"strata"]<-  "urban"
+tmp <- c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-nregion+1):(dim(c.dat.tmp.birth)[1]), ]
+tmp$strata <- "rural"
+c.dat.tmp.birth <- rbind(c.dat.tmp.birth, tmp)
 
-c.dat.tmp.birth<-dat.tmp
-c.dat.tmp.birth$ID<-1:dim(c.dat.tmp.birth)[1]
-c.dat.tmp.birth$sID<-as.numeric(c.dat.tmp.birth$region)
-c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]+1):(dim(c.dat.tmp.birth)[1]+20),"region"]<-rep(unique(c.dat.tmp.birth$region),2)
-c.dat.tmp.birth$sID<-as.numeric(c.dat.tmp.birth$region)
-c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-19):(dim(c.dat.tmp.birth)[1]),"strata"]<-  c(rep("urban",10),rep("rural",10))
+pc.u.phi <- 0.5 
+pc.alpha.phi <- 2/3 
 
-formula <- Antenatal ~ 1+strata+ f(sID, model = "bym2", graph = admin1.mat)
-imod_1_strata <- inla(formula, family="betabinomial",data=c.dat.tmp.birth,Ntrials=n)
+formula <- Antenatal ~ 1 + strata + 
+            f(sID, model = "bym2", graph = admin1.mat, 
+              hyper = list(
+                  prec = list(prior = "pc.prec", param = c(pc.u , pc.alpha)), 
+                  phi = list(prior = 'pc', param = c(pc.u.phi , pc.alpha.phi))))
 
-tail(imod_1_strata$summary.fitted.values,n=20)[1:10,1]*weight.strata.adm1.u1_2018$urban
-+tail(imod_1_strata$summary.fitted.values,n=20)[11:20,1]*weight.strata.adm1.u1_2018$rural
+imod_1_strata <- inla(formula, 
+                    family="betabinomial",
+                    data=c.dat.tmp.birth,
+                    Ntrials=n,
+                    control.predictor = list(compute=TRUE, link = 1))
 
-  
-  
+summary(imod_1_strata)
+    
 # p_urban =rep(imod_1_strata$summary.fixed[1,1],545)+ bym+ imod$summary.random$ID[,2]
 
 ```
