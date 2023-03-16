@@ -34,7 +34,7 @@ library(patchwork) # organize ggplot2 output nicely
 
 
 ```{r}
-setwd(here())
+# setwd(here())
 children <- readRDS(here("data/DHS_data/ZMKR71DT.rds"))
 births <- readRDS(here("data/DHS_data/ZMBR71DT.rds"))
 individual <- readRDS(here("data/DHS_data/ZMIR71DT.rds"))
@@ -99,8 +99,7 @@ IRdata <- IRdata %>%
 Comment: the following reproduces the same as DHS code it seems? Then we should use the DHS codes and then modify `IRdata` object accordingly below (so that for future adaptation to other indicators we could just replace the top chunk.)
 
 ```{r}
-raw.dat.tmp<-individual
-
+raw.dat.tmp<-IRdata
   strat <- attr(raw.dat.tmp$v025,which='labels')
   names(strat) <- tolower(names(strat))
   raw.dat.tmp$v025 <- ifelse(raw.dat.tmp$v025 == strat["urban"][[1]],'urban','rural')
@@ -116,11 +115,11 @@ raw.dat.tmp<-individual
    
 
    dat.tmp<-  raw.dat.tmp %>%
-    filter( b19_01<=60)%>%#for indiviudal file
+    # filter( b19_01<=60)%>%#for indiviudal file
      #filter( b19<=60)%>% #for birth file
   dplyr::  select(c(cluster="v001", householdID= "v002",region="v024", weight="v005", strata="v025",
-             Antenatal="m14_1")) %>% # Antenatal="m14" for birth file
-    mutate(Antenatal = ifelse(Antenatal>3 &  Antenatal<98,1,0)) %>%
+             Antenatal="rh_anc_4vs")) %>% # Antenatal="m14" for birth file
+    # mutate(Antenatal = ifelse(Antenatal>3 &  Antenatal<98,1,0)) %>%
     # replace(is.na(.), 0)
     drop_na()
 
@@ -199,7 +198,21 @@ g1 + g2 + g3
 
 # Admin-1 direct and smoothed direct estimators
 
-Comment: copy down the model specifications here.
+#### Direct estimates
+
+For $y_j$ be the $j_th$ individual result and $w_j$ denote the design weight associated with this individual. Let i be area i.model
+
+$$ \hat p^{HT}_{i}=\frac {\sum_{j \in i} y_j w_j}{\sum_{j \in i} w_j}$$
+
+#### Smoothed direct estimates
+
+
+Use direct estimate $\hat p^{HT}_{i}$ to estimate the true prevalence with random effects model,
+$$log(\hat p^{HT}_{i})|\lambda_{i} \sim\textrm{Normal}(\lambda_{i}, V_{i}^{HT}),$$
+$$\lambda_{i}= \mathbf x_i^{T} \mathbf{\beta} +S_i+e_i.$$
+$x_i$ are areal-level covariates, $S_i$ are structured spatial trends that follow BYM model, and $e_i$ are unstructured spatial errors. Expit($p_{i}$) is the true prevalence.
+
+
 
 Comment: in `smoothSurvey()`, the strata variable is the actual survey stratification variable, which is usually Admin1 crossed with U/R, instead of only the within-area stratification variable (U/R only).
 
@@ -280,13 +293,19 @@ g4 <- mapPlot(fit1$smooth,
 
 # admin-1 Beta-Binomial model with IID space effect
 
-Comment: copy down the model specifications here.
+#### cluster model
+$Y_c$ is the number of events in cluster c, and $n_c$ denote the number of individuals at risk c= 1,$\dots$,C.
+
+$$Y_c|p_c,d\sim \textrm{Beta Binomial}(n_c,p_c,d),$$
+$$p_c=\textrm{expit}(\alpha+x_c\beta+e_{i[s_c]}+S_{i[s_c]}),$$
+where $\alpha$ is the intercept, $x_c$ are cluster-specific covariates, $e_i\overset{\text{iid}}\sim N(0,\sigma_e^2),[s_1,\dots,s_n]\sim ICAR(\sigma^2_c,\phi),$ $i[s_c]$ denotes “the area i within which the cluster $s_c$resides. Areal-level risk: $p_i=expit(\alpha+x_c\beta+e_{i}+S_{i})$
+
 
 Comment: `c.dat.tmp.birth` object name is probably too long and not clear what it is...
 
 ```{r}
 
-   c.dat.tmp.birth <- dat.tmp %>%
+   c.dat.tmp <- dat.tmp %>%
     group_by(cluster) %>%
     mutate(n = length(cluster)) %>%
     mutate(Antenatal = sum(Antenatal,na.rm = T)) %>%
@@ -302,17 +321,17 @@ Comment: updated prior to be PC prior.
 ```{r}
 nregion <- dim(admin1_name_table)[1]
 # add new rows corresponding to each region
-c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]+1):(dim(c.dat.tmp.birth)[1]+nregion),"region"] <- admin1_name_table[,1]
+c.dat.tmp[(dim(c.dat.tmp)[1]+1):(dim(c.dat.tmp)[1]+nregion),"region"] <- admin1_name_table[,1]
 
-c.dat.tmp.birth$ID <- 1:dim(c.dat.tmp.birth)[1]
-c.dat.tmp.birth$sID <- admin1_name_table$sID[match(c.dat.tmp.birth$region, admin1_name_table[,1])]
+c.dat.tmp$ID <- 1:dim(c.dat.tmp)[1]
+c.dat.tmp$sID <- admin1_name_table$sID[match(c.dat.tmp$region, admin1_name_table[,1])]
 
 pc.u = 1
 pc.alpha = 0.01
 formula <- Antenatal ~ 1 + f(sID, model = "iid", hyper = list(prec = list(prior = "pc.prec", param = c(pc.u , pc.alpha))))
 imod_0 <- inla(formula, 
                family="betabinomial",
-               data=c.dat.tmp.birth,
+               data=c.dat.tmp,
                Ntrials=n,
                control.predictor = list(compute=TRUE, link = 1))
 tail(imod_0$summary.fitted.values,n=nregion)
@@ -360,7 +379,7 @@ Comment: I use the same dataset as before to avoid copy pasting errors.
 formula <- Antenatal ~ 1+ f(sID, model = "bym2", graph = admin1.mat, scale.model = TRUE, hyper = list(prec = list(prior = "pc.prec", param = c(pc.u , pc.alpha))))
 imod_1 <- inla(formula, 
                family="betabinomial",
-               data=c.dat.tmp.birth,
+               data=c.dat.tmp,
                Ntrials=n,
                control.predictor = list(compute=TRUE, link = 1))
 ```
@@ -397,16 +416,22 @@ mapPlot(dat.tmp.tem,
 
 # admin-1 model with strata
 
-Comment: copy down the model specifications here maybe?
+
+$$Y_c|p_c,d\sim \textrm{Beta Binomial}(n_c,p_c,d)$$
+
+
+$$p_c=\textrm{expit}(\alpha+\gamma\times I(s_c \in \textrm{urban})+x_c\beta+e_{i[s_c]}+S_{i[s_c]})$$
+Area-level risk: $p_i=q_i\times expit(\alpha+x_c\beta+e_{i}+S_{i})+(1-q_i)\times expit(\alpha+x_c\beta+e_{i}+S_{i})$, where $q_i$ is the proportion of the relevant population in area i.
+
 
 Comment: I also removed repeated data generating steps and built from previous data frame.
 
 ```{r, out.width="50%"}
 
-c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-nregion+1):(dim(c.dat.tmp.birth)[1]),"strata"]<-  "urban"
-tmp <- c.dat.tmp.birth[(dim(c.dat.tmp.birth)[1]-nregion+1):(dim(c.dat.tmp.birth)[1]), ]
+c.dat.tmp[(dim(c.dat.tmp)[1]-nregion+1):(dim(c.dat.tmp)[1]),"strata"]<-  "urban"
+tmp <- c.dat.tmp[(dim(c.dat.tmp)[1]-nregion+1):(dim(c.dat.tmp)[1]), ]
 tmp$strata <- "rural"
-c.dat.tmp.birth <- rbind(c.dat.tmp.birth, tmp)
+c.dat.tmp <- rbind(c.dat.tmp, tmp)
 
 pc.u.phi <- 0.5 
 pc.alpha.phi <- 2/3 
@@ -419,7 +444,7 @@ formula <- Antenatal ~ 1 + strata +
 
 imod_1_strata <- inla(formula, 
                     family="betabinomial",
-                    data=c.dat.tmp.birth,
+                    data=c.dat.tmp,
                     Ntrials=n,
                     control.predictor = list(compute=TRUE, link = 1), 
                     control.compute = list(config = TRUE))
@@ -434,7 +459,7 @@ Urban/rural specific estimates from INLA linear combinations
 dat.tmp.tem<- data.frame( 
                   region=rep(poly.adm1$NAME_1, 2),
                   Antenatal=  tail(imod_1_strata$summary.fitted.values[, 1],n = 2 * nregion), 
-                  strata = tail(c.dat.tmp.birth$strata, n = 2 * nregion))
+                  strata = tail(c.dat.tmp$strata, n = 2 * nregion))
 mapPlot(dat.tmp.tem,
           values = "Antenatal",
           variables= "strata",
@@ -488,4 +513,21 @@ mapPlot(dat.tmp.tem,
   
 ```
 
+
 Comment: maybe here also make a plot of urban proportion, just for exploratory purpose.
+
+```{r urban proportion}
+
+dat.tmp.tem<- data.frame(
+        region=poly.adm1$NAME_1,
+        urban_prop= c(weight.strata.adm1.u1_2018$urban ))
+
+mapPlot(dat.tmp.tem,
+          variables = "urban_prop",
+          by.data = "region",
+          geo =poly.adm1,
+          by.geo = "NAME_1",
+          legend.label = "urban proportion")
+```
+
+
