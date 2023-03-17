@@ -531,4 +531,34 @@ mapPlot(dat.tmp.tem,
           legend.label = "urban proportion")
 ```
 
+```{r}
+tb<-data.frame(region=fit1$HT$region, 
+               est.HT=fit1$HT$HT.est,sd.HT=sqrt(fit1$HT$HT.var),
+               est.smth=fit1$smooth$mean,sd.smth=sqrt(fit1$smooth$var),
+               est.bb.strat=apply(draw.all, 2, mean),sd.bb.strat=apply(draw.all, 2, sd),
+                 est.bb.bym= tail(imod_1$summary.fitted.values,n=nregion)[,1],
+                sd.bb.bym=tail(imod_1$summary.fitted.values,n=nregion)[,2],
+                 est.bb.iid= tail(imod_0$summary.fitted.values,n=nregion)[,1],
+                sd.bb.iid=tail(imod_0$summary.fitted.values,n=nregion)[,2]
+               
+               
+               )
+
+ # write.csv(tb, "zambia.anc.admin1.csv")
+
+
+tb %>%
+  pivot_longer(  cols = starts_with("est"),
+                 names_to = c("est"))%>%
+  ggplot(data=., aes(x=region, y=value, group=est)) +
+  geom_line(aes(col=est))
+
+
+tb %>%
+  pivot_longer(  cols = starts_with("sd"),
+                 names_to = c("sd"))%>%
+  ggplot(data=., aes(x=region, y=value, group=sd)) +
+  geom_line(aes(col=sd))
+```
+
 
