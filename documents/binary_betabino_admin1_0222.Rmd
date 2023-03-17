@@ -157,6 +157,7 @@ admin1_name_table[8, 2] <- "North-Western"
 admin1_name_table$sID <- match(admin1_name_table[, 2], poly.adm1$NAME_1)
 ```
 
+
 ```{r , fig.show="hold", out.width="100%"}
 
 par(mar = c(4, 4, .1, .1))
@@ -341,7 +342,7 @@ tail(imod_0$summary.fitted.values,n=nregion)
 
 ```{r iid, fig.show="hold", out.width="50%"}
 dat.tmp.tem <- as.data.frame(cbind(
-  region=poly.adm1$NAME_1,
+  region=poly.adm1$NAME_1[tail(c.dat.tmp$sID,n=nregion)],
   Antenatal= tail(imod_0$summary.fitted.values,n=nregion)[,1]))
 dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
@@ -354,7 +355,7 @@ mapPlot(dat.tmp.tem,
   
   
 dat.tmp.tem<- as.data.frame(cbind(
-        region=poly.adm1$NAME_1,
+        region=poly.adm1$NAME_1[tail(c.dat.tmp$sID,n=nregion)],
         Antenatal= tail(imod_0$summary.fitted.values,n=nregion)[,2]))
 dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
@@ -387,7 +388,7 @@ imod_1 <- inla(formula,
 
 ```{r bym, fig.show="hold", out.width="50%"}
 dat.tmp.tem<- as.data.frame(cbind(
-                  region=poly.adm1$NAME_1,
+                  region=poly.adm1$NAME_1[tail(c.dat.tmp$sID,n=nregion)],
                   Antenatal= tail(imod_1$summary.fitted.values,n=nregion)[,1]))
 dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
@@ -400,7 +401,7 @@ mapPlot(dat.tmp.tem,
   
   
 dat.tmp.tem<- as.data.frame(cbind(
-        region=poly.adm1$NAME_1,
+        region=poly.adm1$NAME_1[tail(c.dat.tmp$sID,n=nregion)],
         Antenatal= tail(imod_1$summary.fitted.values,n=nregion)[,2]))
 dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
    
@@ -457,7 +458,7 @@ Urban/rural specific estimates from INLA linear combinations
 
 ```{r, out.width="100%"}
 dat.tmp.tem<- data.frame( 
-                  region=rep(poly.adm1$NAME_1, 2),
+                  region=rep(poly.adm1$NAME_1[tail(c.dat.tmp$sID,n=nregion)], 2),
                   Antenatal=  tail(imod_1_strata$summary.fitted.values[, 1],n = 2 * nregion), 
                   strata = tail(c.dat.tmp$strata, n = 2 * nregion))
 mapPlot(dat.tmp.tem,
@@ -489,8 +490,8 @@ for(i in 1:length(samp)){
   str.effect <- tmp["stratarural:1", 1]
   draw.u[i, ] <- s.effect + intercept
   draw.r[i, ] <- s.effect + intercept + str.effect
-  draw.all[i, ] <- draw.u[i, ] * weight.strata.adm1.u1_2018$urban + 
-                   draw.r[i, ] * (1 - weight.strata.adm1.u1_2018$urban)
+  draw.all[i, ] <- expit(draw.u[i, ]) * weight.strata.adm1.u1_2018$urban + 
+                   expit(draw.r[i, ]) * (1 - weight.strata.adm1.u1_2018$urban)
 }
 
 post.u <- apply(draw.u, 2, mean)
