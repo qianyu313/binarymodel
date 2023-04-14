@@ -18,82 +18,714 @@ library(tidyverse)
 library(rdhs)
 library(Hmisc)
 library(labelled)
+library(INLA)
+# libraries needed
+# library(tidyverse)  # most variable creation here uses tidyverse 
+# library(tidyselect) # used to select variables in FP_EVENTS.R
+# library(haven)      # used for Haven labeled DHS variables
+# library(labelled)   # used for Haven labeled variable creation
+# library(expss)    # for creating tables with Haven labeled data
+# library(xlsx)     # for exporting to excel
+library(naniar)   # to use replace_with_na function
+library(here)       # to get R project path
+library(patchwork) # organize ggplot2 output nicely
 ```
 
-```{r}
-births <- readRDS("~/Library/Caches/rdhs/datasets/ZMBR71DT.rds")
-raw.dat.tmp<-births
 
- raw.dat.tmp<-births
+
+
+
+```{r}
+individual <- readRDS(here("data/DHS_data/ZMIR71DT.rds"))
+
+
+country<-"Zambia"
+home.dir<-"/Users/qianyu/Dropbox/binary_model"
+data.dir <- paste0(home.dir,'/data/',country) # set the directory to store the data
+# res.dir <- paste0(home.dir,'/Results/',country) # set the directory to store the results (e.g. fitted R objects, figures, tables in .csv etc.)
+info.name <- paste0(country, "_general_info.Rdata")
+load(file = paste0(home.dir,'/data/Info/',info.name, sep='')) # load the country info
+
+
+```
+
+
+```{r,RH_ANC.R }
+
+IRdata <- individual %>%
+  mutate(wt = v005/1000000)
+
+# period and age of child
+# choose reference period, last 2 years (24 months) or last 5 years (60 months)
+# Using a period of the last 2 years will not match final report but would provide more recent information.
+# period = 24
+IRdata <- IRdata %>%
+  mutate(period = 60)
+
+# age of child. If b19_01 is not available in the data use v008 - b3_01
+if ("TRUE" %in% (!("b19_01" %in% names(IRdata))))
+  IRdata [[paste("b19_01")]] <- NA
+if ("TRUE" %in% all(is.na(IRdata $b19_01)))
+{ b19_included <- 0} else { b19_included <- 1}
+
+if (b19_included==1) {
+  IRdata <- IRdata %>%
+    mutate(age = b19_01)
+} else {
+  IRdata <- IRdata %>%
+    mutate(age = v008 - b3_01)
+}
+
+
+# //Number of ANC visits in 4 categories that match the table in the final report
+IRdata <- IRdata %>%
+  mutate(rh_anc_numvs =
+           case_when(
+             m14_1 == 0 ~ 0 ,
+             m14_1 == 1 ~ 1 ,
+             m14_1  %in% c(2,3)   ~ 2 ,
+             m14_1>=4 & m14_1<=90  ~ 3 ,
+             m14_1>90  ~ 9 ,
+             age>=period ~ 99 )) %>%
+  replace_with_na(replace = list(rh_anc_numvs = c(99))) %>%
+  set_value_labels(rh_anc_numvs = c(none = 0, "1" = 1, "2-3"=2, "4+"=3, "don't know/missing"=9  )) %>%
+  set_variable_labels(rh_anc_numvs = "Number of ANC visits")
+
+# //4+ ANC visits  
+IRdata <- IRdata %>%
+  mutate(rh_anc_4vs =
+           case_when(
+             rh_anc_numvs==3 ~ 1,
+             rh_anc_numvs %in% c(0,1,2,9)   ~ 0 )) %>%
+  set_value_labels(rh_anc_4vs = c("Yes" = 1, "No"=0)) %>%
+  set_variable_labels(rh_anc_4vs = "Attended 4+ ANC visits")
+
+
+raw.dat.tmp<-IRdata
   strat <- attr(raw.dat.tmp$v025,which='labels')
   names(strat) <- tolower(names(strat))
   raw.dat.tmp$v025 <- ifelse(raw.dat.tmp$v025 == strat["urban"][[1]],'urban','rural')
   raw.dat.tmp$v025 <- factor(raw.dat.tmp$v025, levels = c('urban','rural'))
   raw.dat.tmp$v024 <- factor(unlabelled(raw.dat.tmp$v024))
   
-  
-  mapfilename0 <- "/Users/qianyu/Documents/bayes/space-time/pipeline/Data/Zambia/2018/dhsFlat/ZMGE71FL/ZMGE71FL.shp"
-  geo0 <- readOGR(mapfilename0, verbose = FALSE)
-  points<-geo0
 
-    # detect points in the DHS GPS file with mis-specified coordinates and remove them if any
-    wrong.points <- which(points@data$LATNUM == 0.0 & points@data$LONGNUM == 0.0)
-    if(!is.null(dim(wrong.points))){message("There are wrong GPS points: (Longitude, Latitude) = (0, 0)")}
+  dat.tmp<-  raw.dat.tmp %>%
+   filter( age<60)%>%
+   dplyr::  select(c(cluster="v001", householdID= "v002",region="v024", weight="v005", strata="v025",
+             Antenatal="rh_anc_4vs"))
 
-    # remove wrong points in the data if any
-    dat.tmp <- dat.tmp[!(dat.tmp$v001 %in% points@data$DHSCLUST[wrong.points]),]
-    points@data$DHSCLUST[wrong.points] %in% unique(dat.tmp$v001)
 
-    # add the column for GPS coordinate in the data
-   dat.tmp$LONGNUM <- dat.tmp$LATNUM <- NA
-    for(i in 1:dim(points)[1]){
-     dat.tmp$LATNUM[dat.tmp$v001 == points@data$DHSCLUST[i]] <- points@data$LATNUM[i] # assign latitude to DHS cluster location
-     dat.tmp$LONGNUM[dat.tmp$v001 == points@data$DHSCLUST[i]] <- points@data$LONGNUM[i] # assign longitude to DHS cluster location
-   }
-
-   # remove missing points in the data if any
-   miss <- which(dat.tmp$LATNUM == 0 & dat.tmp$LONGNUM == 0)
-    if(length(miss != 0)){
-      dat.tmp <- dat.tmp[-miss,]
-    }
-
-    message("\n Assigned LAT & LONG")
-
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-
-   dat.tmp<-  raw.dat.tmp %>%
-    filter( b19<=60)%>%
-   dplyr::select(c(cluster="v001", region="v024", weight="v005", strata="v025",
-            Antenatal="m14")) %>%
-    mutate(Antenatal = ifelse(Antenatal>3 &  Antenatal<98,1,0)) %>%
-    group_by(cluster) %>%
-    mutate(Antenatal = sum(Antenatal,na.rm = t)) %>%
-    mutate(n = length(cluster)) %>%
-     ungroup()%>%
-    distinct( cluster, .keep_all = TRUE)
- 
-# hist(dat.tmp$Antenatal,main = "Numbers of Antenatal visits>4 in each cluster")
- 
-  
 ```
+
+dat.tmp: 7372 obs. of  6 variables
+
+
+```{r}
+table(dat.tmp$Antenatal)
+
+```
+
+
+length(unique(dat.tmp$cluster))=545
+length(unique(points@data$DHSCLUST))=545, 10 mis+535 dhs
+
+
+```{r}
+mapfilename0 <- paste0(data.dir,"/2018/dhsFlat/ZMGE71FL/ZMGE71FL.shp")
+geo0 <- readOGR(mapfilename0, verbose = FALSE)
+points<-geo0
+
+# detect points in the DHS GPS file with mis-specified coordinates and remove them if any
+## 
+
+
+
+wrong.points <- which(points@data$LATNUM < 0.0 & points@data$LONGNUM < 0.0)# miss clusters very close to 0
+
+wrong.points <- which(points@data$LATNUM == 0.0000001 & points@data$LONGNUM == 0.0000001)
+wrong.points <- which(points@data$LATNUM < 0.0000001 & points@data$LONGNUM < 0.0000001)
+# wrong.points <- which(points@data$SOURCE=="MIS")
+
+if(!is.null(dim(wrong.points))){message("There are wrong GPS points: (Longitude, Latitude) = (0, 0)")}
+
+# remove wrong points in the data if any
+dat.tmp <- dat.tmp[!(dat.tmp$cluster %in% points@data$DHSCLUST[wrong.points]),]
+points@data$DHSCLUST[wrong.points] %in% unique(dat.tmp$cluster)
+
+# add the column for GPS coordinate in the data
+dat.tmp$LONGNUM <- dat.tmp$LATNUM <- NA
+for(i in 1:dim(points)[1]){
+  dat.tmp$LATNUM[dat.tmp$cluster == points@data$DHSCLUST[i]] <- points@data$LATNUM[i] # assign latitude to DHS cluster location
+  dat.tmp$LONGNUM[dat.tmp$cluster == points@data$DHSCLUST[i]] <- points@data$LONGNUM[i] # assign longitude to DHS cluster location
+}
+
+# remove missing points in the data if any
+miss <- which(dat.tmp$LATNUM == 0 & dat.tmp$LONGNUM == 0)
+if(length(miss != 0)){
+  dat.tmp <- dat.tmp[-miss,]
+}
+
+message("\n Assigned LAT & LONG")
+```
+ -158 rows as wrong.points/no gps/not dhs cluster?
+
+
+
+```{r}
+weight.strata.adm2.u1 <- readRDS(here(paste0(data.dir,"/UR/U1_fraction/admin2_u1_urban_weights.rds")))
+weight.strata.adm2.u1_2018<-subset(weight.strata.adm2.u1, years == 2018)
+```
+
+
+
+```{r}
+setwd(data.dir)
+poly.path<-"shapeFiles/gadm41_ZMB_shp"
+poly.adm0 <- readOGR(dsn = poly.path,encoding = "UTF-8", use_iconv = TRUE,
+                     layer = as.character(poly.layer.adm0)) # load the national shape file
+# use encoding to read special characters
+poly.adm1 <- readOGR(dsn = poly.path,encoding = "UTF-8", use_iconv = TRUE,
+                     layer = as.character(poly.layer.adm1)) # load the shape file of admin-1 regions
+
+if(exists('poly.layer.adm2')){
+  poly.adm2 <- readOGR(dsn = poly.path,encoding = "UTF-8", use_iconv = TRUE,
+                       layer = as.character(poly.layer.adm2))} # load the shape file of admin-2 regions
+
+# set coordinate reference system to be equal
+if(exists("poly.adm2")){
+  proj4string(poly.adm0) <- proj4string(poly.adm1)  <- proj4string(poly.adm2)
+}else{
+  proj4string(poly.adm0) <- proj4string(poly.adm1)
+}
+
+```
+
+```{r}
+# poly.adm1<-readRDS(file = "/Users/qianyu/Documents/bayes/space-time/binarymodel/data/poly.adm1.rds")
+admin1.mat <- poly2nb(SpatialPolygons(poly.adm1@polygons))
+admin1.mat <- nb2mat(admin1.mat, zero.policy = TRUE)
+colnames(admin1.mat) <- rownames(admin1.mat) <- paste0("admin1_", 1:dim(admin1.mat)[1])
+admin1.names <- data.frame(GADM = eval(str2lang(poly.label.adm1)),
+                           Internal = rownames(admin1.mat))
+ # poly.adm2<-readRDS(file = "/Users/qianyu/Documents/bayes/space-time/binarymodel/data/poly.adm2.rds")
+admin2.mat <- poly2nb(SpatialPolygons(poly.adm2@polygons))
+admin2.mat <- nb2mat(admin2.mat, zero.policy = TRUE)
+colnames(admin2.mat) <- rownames(admin2.mat) <- paste0("admin2_", 1:dim(admin2.mat)[1])
+admin2.names <- data.frame(GADM = eval(str2lang(poly.label.adm2)),
+                           Internal = rownames(admin2.mat))
+
+```
+
+zambia admin2: 115
+
+```{r}
+
+# assign admin regions based on coordinates and polygon files
+adm1.ind <- exists("poly.adm1")
+adm2.ind <- exists("poly.adm2")
+
+  
+points.frame <- as.data.frame(dat.tmp[,c("LONGNUM", "LATNUM")]) # retrieve GPS coordinates where data is sampled.
+points.frame <- SpatialPoints(points.frame) # convert the GPS coordinates into "sp" object.
+# if(adm2.ind){
+  poly.over.adm2 <- SpatialPolygons(poly.adm2@polygons)
+  proj4string(points.frame) <- proj4string(poly.over.adm2) <-
+    proj4string(poly.adm2)  <-
+    proj4string(poly.adm1)
+  admin2.key <- over(points.frame, poly.over.adm2)
+  # miss.frame.adm2 <- unique(points.frame@coords[which(is.na(admin2.key)),])
+    miss.frame.adm2 <- points.frame@coords[which(is.na(admin2.key)),]
+
+  # if(dim(miss.frame.adm2)[1] != 0){
+  #   miss.poly.adm2 <- dist2Line( miss.frame.adm2, poly.over.adm2)
+
+  # for(i in 1:dim(miss.poly.adm2)[1]){
+  # long.ids <- which(points.frame@coords[,c("LONGNUM")] %in% miss.frame.adm2[1])
+  # lat.ids <- which(points.frame@coords[,c("LATNUM")] %in% miss.frame.adm2[2])
+  # ids <- intersect(long.ids, lat.ids)
+  # admin2.key[ids] <- rep(miss.poly.adm2[i, 'ID'], length(ids))
+    # }
+  # }
+  
+  dat.tmp$admin2 <- admin2.key
+  dat.tmp$admin2.char <- paste0("admin2_", admin2.key)
+  dat.tmp$admin2.name <- as.character(eval(str2lang(poly.label.adm2)))[admin2.key]
+# }else{
+#   dat.tmp$admin2 <- dat.tmp$admin2.name <- NA
+#   message("There is no Admin2 polygon to assign points to.")
+# }
+
+```
+
+
 
 
 ```{r}
 
-country <- 'Zambia'
-home.dir<-"/Users/qianyu/Documents/bayes/space-time/UN-Subnational-Estimates-main_old"
-res.dir <- paste0(home.dir,'/Results/',country) 
-setwd(paste0(res.dir,'/UR'))
-weight.strata.adm1.u1 <- readRDS(paste0('U1_fraction/','admin1_u1_urban_weights.rds'))
-weight.strata.adm1.u1_2012<-weight.strata.adm1.u1[121:130,]
+
+#admin 2 maps to see which admin2s are NA
+
+dat.tmp_tem<-  dat.tmp %>%
+  group_by(admin2.name) %>%
+  summarise(Antenatal = sum(Antenatal,na.rm = t))%>% 
+   mutate(variables=rep("Antenatal",length(Antenatal))) 
+
+
+
+# dat.tmp_tem<- as.data.frame(cbind(region=poly.adm2$NAME_2,Antenatal= tail(imod_0$summary.fitted.values,n=115)[,1],variables=rep("beta_bino",115)))
+# dat.tmp_tem$Antenatal<-as.numeric ( dat.tmp_tem$Antenatal)
+
+mapPlot(dat.tmp_tem,
+        values = "Antenatal",
+        variables= "variables",
+        by.data = "admin2.name",
+        geo =poly.adm2,
+        by.geo = "NAME_2",is.long = TRUE)
+
 ```
+
+
+
+```{r}
+length(unique(dat.tmp$admin2.char))#[1] 112 missing Itezhi-tezhi, Chirundu, Shibuyunji
+
+length(unique(dat.tmp$admin2.name))#[1] 112
+dim(admin2.mat)[1]# 115 115
+dat.tmp_tem[order(dat.tmp_tem$Antenatal, decreasing = TRUE),][1,]
+#Lusaka            282 Antenatal
+# 
+# 
+# dat.tmp<-dat.tmp[dat.tmp$admin2.char != "admin2_NA", ]
+# dat.tmp<-  dat.tmp %>%
+#   mutate(year=rep("2018",length(Antenatal))) 
+
+```
+
+
+
+
+
+```{r}
+dat.tmp<-  dat.tmp %>%
+  mutate(year=rep("2018",length(Antenatal))) 
+
+
+# fit1<-smoothSurvey(as.data.frame(dat.tmp),
+#                    responseType = c("binary", "gaussian")[1],
+#                    responseVar= "Antenatal",
+#                    regionVar = "admin2.char",
+#                     clusterVar = "~cluster+householdID",#
+#                     weightVar = "weight",
+#                     strataVar = "strata",
+#                    Amat =admin2.mat,
+#                    CI = 0.95)
+
+```
+
+
+
+```{r}
+
+try<-dat.tmp
+HT<-try%>%
+    group_by(admin2.char) %>%
+    mutate(HT = sum(weight*Antenatal)/sum(weight)) %>%
+     ungroup()%>%
+    distinct( admin2.char, .keep_all = TRUE)
+HT$HT
+
+```
+
+
+
+
+
+
+# admin-2 Beta-Binomial model with IID space effect
+
+
+
+```{r}
+
+   c.dat.tmp <- dat.tmp %>%
+    group_by(cluster) %>%
+    mutate(n = length(cluster)) %>%
+    mutate(Antenatal = sum(Antenatal,na.rm = T)) %>%
+    ungroup()%>%
+    distinct( cluster, .keep_all = TRUE)
+
+```
+
+
+  
+
+
+```{r}
+
+ # poly.adm2@data:admin1 by alphabetical, admin2 not. 
+
+
+nregion <- dim(poly.adm2)[1]
+# add new rows corresponding to each region
+
+
+geo_admin2<-data.frame(admin1.name=poly.adm2@data$NAME_1,admin2.name=poly.adm2@data$NAME_2,sID=c(1:115))
+c.dat.tmp[(dim(c.dat.tmp)[1]+1):(dim(c.dat.tmp)[1]+nregion),"admin2.name"]<-geo_admin2$admin2.name
+
+# c.dat.tmp$ID <- 1:dim(c.dat.tmp)[1]
+c.dat.tmp$sID <- geo_admin2$sID[match(c.dat.tmp$admin2.name, geo_admin2[,"admin2.name"])]
+
+pc.u = 1
+pc.alpha = 0.01
+formula <- Antenatal ~ 1 + f(sID, model = "iid", hyper = list(prec = list(prior = "pc.prec", param = c(pc.u , pc.alpha))))
+imod_0 <- inla(formula, 
+               family="betabinomial",
+               data=c.dat.tmp,
+               Ntrials=n,
+               control.predictor = list(compute=TRUE, link = 1))
+#tail(imod_0$summary.fitted.values,n=nregion)
+```
+
+
+```{r iid, fig.show="hold", out.width="50%"}
+dat.tmp.tem <- as.data.frame(cbind(
+  region=poly.adm2$NAME_2[tail(c.dat.tmp$sID,n=nregion)],
+  Antenatal= tail(imod_0$summary.fitted.values,n=nregion)[,1]))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
+   
+
+
+mapPlot(dat.tmp.tem,
+          variables = "Antenatal",
+          by.data = "region",
+          geo = poly.adm2,
+          by.geo = "NAME_2", 
+          legend.label = "BB (iid)")
+  
+  
+dat.tmp.tem<- as.data.frame(cbind(
+        region=poly.adm2$NAME_2[tail(c.dat.tmp$sID,n=nregion)],
+        Antenatal= tail(imod_0$summary.fitted.values,n=nregion)[,2]))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
+   
+mapPlot(dat.tmp.tem,
+          variables = "Antenatal",
+          by.data = "region",
+          geo =poly.adm2,
+          by.geo = "NAME_2",
+          legend.label = "SD BB (iid)")
+  
+```
+
+
+
+
+```{r iid aggregate to admin1, fig.show="hold", out.width="50%"}
+dat.tmp.tem <- as.data.frame(cbind(
+  region=poly.adm2$NAME_2[tail(c.dat.tmp$sID,n=nregion)],
+  region1=poly.adm2$NAME_1[tail(c.dat.tmp$sID,n=nregion)],
+  Antenatal= tail(imod_0$summary.fitted.values,n=nregion)[,1]))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
+  
+
+dat.tmp.tem <- dat.tmp.tem %>%
+    group_by(region1) %>%
+    # mutate(n = length(cluster)) %>%
+    mutate(Antenatal = mean(Antenatal,na.rm = T)) %>%
+    ungroup()%>%
+    distinct( region1, .keep_all = TRUE)
+   
+mapPlot(dat.tmp.tem,
+          variables = "Antenatal",
+          by.data = "region1",
+          geo = poly.adm1,
+          by.geo = "NAME_1", 
+          legend.label = "BB (iid)")
+  
+
+dat.tmp.tem<- as.data.frame(cbind(
+        region=poly.adm2$NAME_2[tail(c.dat.tmp$sID,n=nregion)],
+        region1=poly.adm2$NAME_1[tail(c.dat.tmp$sID,n=nregion)],
+        Antenatal= tail(imod_0$summary.fitted.values,n=nregion)[,2]))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
+
+dat.tmp.tem <- dat.tmp.tem %>%
+    group_by(region1) %>%
+    # mutate(n = length(cluster)) %>%
+    mutate(Antenatal = mean(Antenatal,na.rm = T)) %>%
+    ungroup()%>%
+    distinct( region1, .keep_all = TRUE)
+   
+
+mapPlot(dat.tmp.tem,
+          variables = "Antenatal",
+          by.data = "region1",
+          geo =poly.adm1,
+          by.geo = "NAME_1",
+          legend.label = "SD BB (iid)")
+
+
+
+
+
+
+```
+
+
+
+
+# Admin-2 Beta-Binomial model with BYM2 spatial effect
+
+```{r}
+
+formula <- Antenatal ~ 1+ f(sID, model = "bym2", graph = admin2.mat, scale.model = TRUE, hyper = list(prec = list(prior = "pc.prec", param = c(pc.u , pc.alpha))))
+imod_1 <- inla(formula, 
+               family="betabinomial",
+               data=c.dat.tmp,
+               Ntrials=n,
+               control.predictor = list(compute=TRUE, link = 1))
+```
+
+
+
+```{r , fig.show="hold", out.width="50%"}
+dat.tmp.tem <- as.data.frame(cbind(
+  region=poly.adm2$NAME_2[tail(c.dat.tmp$sID,n=nregion)],
+  Antenatal= tail(imod_1$summary.fitted.values,n=nregion)[,1]))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
+   
+
+
+mapPlot(dat.tmp.tem,
+          variables = "Antenatal",
+          by.data = "region",
+          geo = poly.adm2,
+          by.geo = "NAME_2", 
+          legend.label = "BB (iid)")
+  
+  
+dat.tmp.tem<- as.data.frame(cbind(
+        region=poly.adm2$NAME_2[tail(c.dat.tmp$sID,n=nregion)],
+        Antenatal= tail(imod_1$summary.fitted.values,n=nregion)[,2]))
+dat.tmp.tem$Antenatal<-as.numeric ( dat.tmp.tem$Antenatal)
+   
+mapPlot(dat.tmp.tem,
+          variables = "Antenatal",
+          by.data = "region",
+          geo =poly.adm2,
+          by.geo = "NAME_2",
+          legend.label = "SD BB (iid)")
+  
+```
+
+
+# Admin-2 model with strata
+
+
+```{r, out.width="50%"}
+
+c.dat.tmp[(dim(c.dat.tmp)[1]-nregion+1):(dim(c.dat.tmp)[1]),"strata"]<-  "urban"
+tmp <- c.dat.tmp[(dim(c.dat.tmp)[1]-nregion+1):(dim(c.dat.tmp)[1]), ]
+tmp$strata <- "rural"
+c.dat.tmp <- rbind(c.dat.tmp, tmp)
+
+pc.u.phi <- 0.5 
+pc.alpha.phi <- 2/3 
+
+formula <- Antenatal ~ 1 + strata + 
+            f(sID, model = "bym2", graph = admin2.mat, 
+              hyper = list(
+                  prec = list(prior = "pc.prec", param = c(pc.u , pc.alpha)), 
+                  phi = list(prior = 'pc', param = c(pc.u.phi , pc.alpha.phi))))
+
+imod_1_strata <- inla(formula, 
+                    family="betabinomial",
+                    data=c.dat.tmp,
+                    Ntrials=n,
+                    control.predictor = list(compute=TRUE, link = 1), 
+                    control.compute = list(config = TRUE))
+
+summary(imod_1_strata)
+    
+```
+
+Urban/rural specific estimates from INLA linear combinations
+
+```{r, out.width="100%"}
+dat.tmp.tem<- data.frame( 
+                  region=rep(poly.adm2$NAME_2[tail(c.dat.tmp$sID,n=nregion)], 2),
+                  Antenatal=  tail(imod_1_strata$summary.fitted.values[, 1],n = 2 * nregion), 
+                  strata = tail(c.dat.tmp$strata, n = 2 * nregion))
+mapPlot(dat.tmp.tem,
+          values = "Antenatal",
+          variables= "strata",
+          by.data = "region",
+          geo =poly.adm2,
+          by.geo = "NAME_2",
+          is.long = TRUE, 
+          legend.label = "BB stratified") 
+  
+```
+
+
+
+
+```{r, out.width="100%"}
+nsamp <- 1000
+samp <- inla.posterior.sample(n = nsamp, result = imod_1_strata, intern = TRUE)
+
+draw.u <- matrix(NA, nsamp, nregion)
+draw.r <- matrix(NA, nsamp, nregion)
+draw.all <- matrix(NA, nsamp, nregion)
+
+for(i in 1:length(samp)){
+  tmp <- samp[[i]]$latent
+  s.effect <- tmp[paste0("sID:", 1:nregion), 1]
+  intercept <- tmp["(Intercept):1", 1]
+  str.effect <- tmp["stratarural:1", 1]
+  draw.u[i, ] <- expit(s.effect + intercept)
+  draw.r[i, ] <- expit(s.effect + intercept + str.effect)
+  draw.all[i, ] <- draw.u[i, ] * weight.strata.adm2.u1_2018$urban +
+                   draw.r[i, ] * (1 - weight.strata.adm2.u1_2018$urban)
+}
+
+post.u <- apply(draw.u, 2, mean)
+post.r <- apply(draw.r, 2, mean)
+post.all <- apply(draw.all, 2, mean)
+
+
+post.u.ci <- apply(draw.u, 2, quantile, probs = c(0.25,0.75))
+post.r.ci <- apply(draw.r, 2,  quantile, probs = c(0.25,0.75))
+post.all.ci <- apply(draw.all, 2,  quantile, probs = c(0.25,0.75))
+
+dat.tmp.tem <- data.frame(mean = c(post.u, post.r, post.all), 
+                          type = c(rep("urban", nregion), rep("rural", nregion), 
+                            rep("aggregated", nregion)))
+dat.tmp.tem$region <- rep(poly.adm2$NAME_2, 3)
+
+mapPlot(dat.tmp.tem,
+          values = "mean",
+          variables= "type",
+          by.data = "region",
+          geo = poly.adm2,
+          by.geo = "NAME_2",
+          is.long = TRUE, 
+          legend.label = "BB stratified")
+  
+```
+
+
+
+```{r urban proportion}
+
+dat.tmp.tem<- data.frame(
+        region=poly.adm2$NAME_2,
+        urban_prop= c(weight.strata.adm2.u1_2018$urban ))
+
+mapPlot(dat.tmp.tem,
+          variables = "urban_prop",
+          by.data = "region",
+          geo =poly.adm2,
+          by.geo = "NAME_2",
+          legend.label = "urban proportion")
+```
+
+
+
+```{r}
+
+
+tb<-data.frame(
+               region=poly.adm2$NAME_2, 
+                # est.HT=fit1$HT$HT.est,
+                # est.HT=HT$HT,
+               # sd.HT=sqrt(fit1$HT$HT.var),
+               # est.smth=fit1$smooth$mean,
+               # sd.smth=sqrt(fit1$smooth$var),
+               # lower.smth=fit1$smooth$lower,
+               # upper.smth=fit1$smooth$upper,
+              
+               est.bb.strat=post.all,
+               sd.bb.strat=apply(draw.all, 2, sd),
+               lower.strat=post.all.ci[1,],
+               upper.strat=post.all.ci[2,]
+               
+               ,
+                 est.bb.bym= tail(imod_1$summary.fitted.values,n=nregion)[,1],
+                sd.bb.bym=tail(imod_1$summary.fitted.values,n=nregion)[,2],
+                 est.bb.iid= tail(imod_0$summary.fitted.values,n=nregion)[,1],
+                sd.bb.iid=tail(imod_0$summary.fitted.values,n=nregion)[,2]
+               
+               
+               )
+
+ # write.csv(tb, "zambia.anc.admin2.csv")
+# 
+# 
+tb %>%
+  pivot_longer(  cols = starts_with("est"),
+                 names_to = c("est"))%>%
+  ggplot(data=., aes(x=region, y=value, group=est)) +
+  geom_line(aes(col=est))
+
+
+tb %>%
+  pivot_longer(  cols = starts_with("sd"),
+                 names_to = c("sd"))%>%
+  ggplot(data=., aes(x=region, y=value, group=sd)) +
+  geom_line(aes(col=sd))
+```
+
+
+```{r}
+ # dat.tmp.tem<-data.frame(draw.all)
+
+# dat.tmp.tem<-data.frame(draw.all)%>%
+#   setNames(poly.adm2$NAME_1)%>%
+#   group_by(region1) %>%
+  
+
+
+dat.tmp.tem<-as.data.frame(t(draw.all))
+ dat.tmp.tem$NAME_1<- poly.adm2$NAME_1
+
+ try1<- dat.tmp.tem%>%
+ group_by(NAME_1) %>%
+  summarise(across(V1:V1000, mean))
+
+admin1.draw.all<- t(try1[,2:1001])
+ 
+admin1.post.all <- apply(admin1.draw.all, 2, mean)
+admin1.post.all.sd <- apply(admin1.draw.all, 2, sd)
+admin1.post.all.ci <- apply(admin1.draw.all, 2,  quantile, probs = c(0.25,0.75))
+
+
+```
+
+
+
+#### compare admin2.strat with admin 1 results
+
+```{r}
+
+dt<-read_csv(file = "/Users/qianyu/Dropbox/binary_model/result/zambia.anc.admin1.csv")
+dt$est.admin2.strat<-admin1.post.all
+dt$sd.admin2.strat<-admin1.post.all.sd
+```
+```{r}
+
+dt %>%
+  pivot_longer(  cols = starts_with("est"),
+                 names_to = c("est"))%>%
+  ggplot(data=., aes(x=region, y=value, group=est)) +
+  geom_line(aes(col=est))
+
+
+dt %>%
+  pivot_longer(  cols = starts_with("sd"),
+                 names_to = c("sd"))%>%
+  ggplot(data=., aes(x=region, y=value, group=sd)) +
+  geom_line(aes(col=sd))
+```
+
 
