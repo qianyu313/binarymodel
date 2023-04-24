@@ -33,12 +33,25 @@ library(patchwork) # organize ggplot2 output nicely
 ```
 
 
+
+
+```{r}
+individual <- readRDS(here("data/DHS_data/ZMIR71DT.rds"))
+country<-"Zambia"
+home.dir<-"/Users/qianyu/Dropbox/binary_model"
+data.dir <- paste0(home.dir,'/data/',country) # set the directory to store the data
+res.dir <- paste0(home.dir,'/Results/',country) # set the directory to store the results (e.g. fitted R objects, figures, tables in .csv etc.)
+info.name <- paste0(country, "_general_info.Rdata")
+load(file = paste0(home.dir,'/data/Info/',info.name, sep='')) # load the country info
+
+```
+
 ```{r}
 # setwd(here())
-children <- readRDS(here("data/DHS_data/ZMKR71DT.rds"))
-births <- readRDS(here("data/DHS_data/ZMBR71DT.rds"))
-individual <- readRDS(here("data/DHS_data/ZMIR71DT.rds"))
-household <- readRDS(here("data/DHS_data/ZMHR71DT.rds"))
+# children <- readRDS(here("data/DHS_data/ZMKR71DT.rds"))
+# births <- readRDS(here("data/DHS_data/ZMBR71DT.rds"))
+# individual <- readRDS(here("data/DHS_data/ZMIR71DT.rds"))
+# household <- readRDS(here("data/DHS_data/ZMHR71DT.rds"))
 ```
 
 
@@ -135,9 +148,11 @@ table(dat.tmp$Antenatal)
 ```
 
 
+
 ```{r}
-weight.strata.adm1.u1 <- readRDS(here("data/UR/U1_fraction/admin1_u1_urban_weights.rds"))
-weight.strata.adm1.u1_2018<-subset(weight.strata.adm1.u1, years == 2018)
+weight.strata.adm1.u1 <- readRDS(here(paste0(res.dir,"/UR/Uf_fraction/admin1_uf_urban_weights.rds")))
+weight.strata.adm1.u1_2018<-weight.strata.adm1.u1[1:10,]
+
 ```
 
 
@@ -499,20 +514,27 @@ post.u <- apply(draw.u, 2, mean)
 post.r <- apply(draw.r, 2, mean)
 post.all <- apply(draw.all, 2, mean)
 
+post.u.sd <- apply(draw.u, 2, sd)
+post.r.sd <- apply(draw.r, 2, sd)
+post.all.sd <- apply(draw.all, 2, sd)
+
 
 post.u.ci <- apply(draw.u, 2, quantile, probs = c(0.25,0.75))
 post.r.ci <- apply(draw.r, 2,  quantile, probs = c(0.25,0.75))
 post.all.ci <- apply(draw.all, 2,  quantile, probs = c(0.25,0.75))
 
 dat.tmp.tem <- data.frame(mean = c(post.u, post.r, post.all), 
+                          sd = c(post.u.sd, post.r.sd, post.all.sd),
+                          lbd=c(post.u.ci[1,], post.r.ci[1,], post.all.ci[1,]),
+                          ubd=c(post.u.ci[2,], post.r.ci[2,], post.all.ci[2,]),
                           type = c(rep("urban", nregion), rep("rural", nregion), 
                             rep("aggregated", nregion)))
-dat.tmp.tem$region <- rep(poly.adm1$NAME_1, 3)
+dat.tmp.tem$NAME_1 <- rep(poly.adm1$NAME_1, 3)
 
 mapPlot(dat.tmp.tem,
           values = "mean",
           variables= "type",
-          by.data = "region",
+          by.data = "NAME_1",
           geo = poly.adm1,
           by.geo = "NAME_1",
           is.long = TRUE, 
@@ -576,5 +598,14 @@ tb %>%
   ggplot(data=., aes(x=region, y=value, group=sd)) +
   geom_line(aes(col=sd))
 ```
+
+
+```{r,rename and save model results}
+admin1_dir<-fit1
+admin1_bbm_strata<-dat.tmp.tem
+# save(admin1_dir, admin1_bbm_strata,file = "/Users/qianyu/Dropbox/binary_model/Results/Zambia/ModelResult/admin1.rda")
+```
+
+
 
 
