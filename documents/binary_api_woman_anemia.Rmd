@@ -1,0 +1,373 @@
+---
+title: "binary_api_womananemia"
+author: "Qianyu Dong"
+date: "2023-05-05"
+output: html_document
+---
+
+dhs:IR dataset Individual Recode
+data process code: nt_wm_any_anem 
+api: AN_ANEM_W_ANY
+
+
+
+
+```{r, echo=FALSE,message=FALSE, warning= FALSE}
+library(dplyr)
+library(rgdal)
+options(warn=0)
+library(spdep)
+library(SUMMER)
+library(geosphere)
+library(stringr)
+library(tidyverse)
+#devtools::install_github("ropensci/rdhs")
+library(rdhs)
+library(Hmisc)
+library(labelled)
+library(INLA)
+# libraries needed
+# library(tidyverse)  # most variable creation here uses tidyverse 
+# library(tidyselect) # used to select variables in FP_EVENTS.R
+# library(haven)      # used for Haven labeled DHS variables
+# library(labelled)   # used for Haven labeled variable creation
+# library(expss)    # for creating tables with Haven labeled data
+# library(xlsx)     # for exporting to excel
+library(naniar)   # to use replace_with_na function
+library(here)       # to get R project path
+library(patchwork) # organize ggplot2 output nicely
+#library(sjlabelled)
+```
+
+
+
+
+```{r}
+#individual <- readRDS(here("data/DHS_data/ZMIR71DT.rds"))
+country<-"Zambia"
+home.dir<-"/Users/qianyu/Dropbox/binary_model"
+data.dir <- paste0(home.dir,'/data/',country) # set the directory to store the data
+res.dir <- paste0(home.dir,'/Results/',country) # set the directory to store the results (e.g. fitted R objects, figures, tables in .csv etc.)
+info.name <- paste0(country, "_general_info.Rdata")
+load(file = paste0(home.dir,'/data/Info/',info.name, sep='')) # load the country info
+
+```
+
+```{r}
+ # setwd(here())
+# children <- readRDS(here("data/DHS_data/ZMKR71DT.rds"))
+# births <- readRDS(here("data/DHS_data/ZMBR71DT.rds"))
+ # individual <- readRDS(here("data/DHS_data/ZMIR71DT.rds"))
+ individual <- readRDS("~/Library/Caches/rdhs/datasets/ZMIR71DT.rds")
+# household <- readRDS("data.dir/DHS_data/ZMHR71DT.rds")
+# householdMember <- readRDS("~/Library/Caches/rdhs/datasets/ZMPR71DT.rds")
+
+```
+
+```{r}
+IRdata <- individual %>%
+  mutate(wt = v005/1000000)
+# 
+# *** Anemia indicators ***
+# 
+# //Any anemia
+IRdata <- IRdata %>%
+  mutate(nt_wm_any_anem =
+           case_when(
+             v042==1 & v457<4 ~ 1 ,
+             v042==1 &  v455==0 ~ 0)) %>%
+  set_value_labels(nt_wm_any_anem = c("Yes" = 1, "No"=0  )) %>%
+  set_variable_labels(nt_wm_any_anem = "Any anemia - women")
+
+```
+
+
+
+hv025 instead of v025 in PRdata 
+
+```{r}
+raw.dat.tmp<-IRdata
+
+  strat <- attr(raw.dat.tmp$v025,which='labels')
+  names(strat) <- tolower(names(strat))
+  raw.dat.tmp$hv025 <- ifelse(raw.dat.tmp$v025 == strat["urban"][[1]],'urban','rural')
+  raw.dat.tmp$hv025 <- factor(raw.dat.tmp$v025, levels = c('urban','rural'))
+  raw.dat.tmp$hv024 <- factor(unlabelled(raw.dat.tmp$v024))
+  
+
+   dat.tmp<-  raw.dat.tmp %>%
+   # filter( age<60)%>%#for indiviudal file
+     #filter( b19<=60)%>% #for birth file
+    # filter( hb19<=60)%>% #for household member/PR file
+
+   dplyr::  select(c(cluster="v001", householdID= "v002",region="v024", weight="v005", strata="v025",
+             nt_wm_any_anem="nt_wm_any_anem"))
+   #%>% # Antenatal="m14" for birth file
+    # mutate(Antenatal = ifelse(Antenatal>3 &  Antenatal<98,1,0)) %>%
+    # replace(is.na(.), 0)
+    # drop_na()
+
+
+ # hist(dat.tmp$Antenatal,main = "Numbers of Antenatal visits>4 in each cluster")
+ 
+  
+```
+
+
+
+
+```{r}
+table(dat.tmp$nt_wm_any_anem)
+```
+
+
+
+```{r}
+weight.strata.adm1.u1 <- readRDS(here(paste0(res.dir,"/UR/Uf_fraction/admin1_uf_urban_weights.rds")))
+weight.strata.adm1.u1_2018<-weight.strata.adm1.u1[1:10,]
+
+```
+
+
+```{r}
+
+poly.adm1<-readRDS(paste0(data.dir,"/Geo/poly.adm1.rds"))
+admin1.mat <- poly2nb(SpatialPolygons(poly.adm1@polygons))
+admin1.mat <- nb2mat(admin1.mat, zero.policy = TRUE)
+```
+
+
+# admin-1 plots
+
+Comment: The region name matching needs to be handled in a more systematic way. But here I created the lookup table interactively
+```{r}
+admin1_name_table <- data.frame(by.data = sort(unique(dat.tmp$region)), by.geo = sort(poly.adm1$NAME_1))
+admin1_name_table[7, 2] <- "Northern"
+admin1_name_table[8, 2] <- "North-Western"
+admin1_name_table$sID <- match(admin1_name_table[, 2], poly.adm1$NAME_1)
+```
+
+
+```{r , fig.show="hold", out.width="100%"}
+
+par(mar = c(4, 4, .1, .1))
+
+dat.tmp.tem <- dat.tmp %>%
+      group_by(region) %>%
+      summarise(Total = sum(nt_wm_any_anem > -1, na.rm = t), 
+                nt_wm_any_anem = sum(nt_wm_any_anem, na.rm = t),) %>%
+      mutate(Prop = nt_wm_any_anem / Total) %>% as.data.frame()
+
+dat.tmp.tem$region <- admin1_name_table[match(dat.tmp.tem$region, admin1_name_table[,1]), 2]
+   
+g1 <- mapPlot(dat.tmp.tem,
+          variables = "nt_wm_any_anem",
+          by.data = "region",
+          geo = poly.adm1,
+          by.geo = "NAME_1",
+          is.long = FALSE, 
+          legend.label = "Count")
+g2 <- mapPlot(dat.tmp.tem,
+          variables = "Total",
+          by.data = "region",
+          geo = poly.adm1,
+          by.geo = "NAME_1",
+          is.long = FALSE, 
+          legend.label = "Total")
+g3 <- mapPlot(dat.tmp.tem,
+          variables = "Prop",
+          by.data = "region",
+          geo = poly.adm1,
+          by.geo = "NAME_1",
+          is.long = FALSE, 
+          legend.label = "Prop (unweighted)")
+g1 + g2 + g3    
+
+```
+
+
+
+# Admin-1 direct and smoothed direct estimators
+
+#### Direct estimates
+
+For $y_j$ be the $j_th$ individual result and $w_j$ denote the design weight associated with this individual. Let i be area i.model
+
+$$ \hat p^{HT}_{i}=\frac {\sum_{j \in i} y_j w_j}{\sum_{j \in i} w_j}$$
+
+#### Smoothed direct estimates
+
+
+Use direct estimate $\hat p^{HT}_{i}$ to estimate the true prevalence with random effects model,
+$$log(\hat p^{HT}_{i})|\lambda_{i} \sim\textrm{Normal}(\lambda_{i}, V_{i}^{HT}),$$
+$$\lambda_{i}= \mathbf x_i^{T} \mathbf{\beta} +S_i+e_i.$$
+$x_i$ are areal-level covariates, $S_i$ are structured spatial trends that follow BYM model, and $e_i$ are unstructured spatial errors. Expit($p_{i}$) is the true prevalence.
+
+```{r}
+   bino.dat.tmp<-dat.tmp
+   bino.dat.tmp$strata.full <- paste(bino.dat.tmp$region, bino.dat.tmp$strata)
+   bino.dat.tmp$region <- admin1_name_table[match(bino.dat.tmp$region, admin1_name_table[,1]), 2]
+
+   admin1.mat <- poly2nb(SpatialPolygons(poly.adm1@polygons))
+   admin1.mat <- nb2mat(admin1.mat, zero.policy = TRUE)
+   colnames(admin1.mat) <- rownames(admin1.mat) <-  poly.adm1$NAME_1
+   clean_bino.dat.tmp<- bino.dat.tmp[complete.cases(bino.dat.tmp$nt_wm_any_anem), ]
+   fit1 <- smoothSurvey(as.data.frame(clean_bino.dat.tmp),
+            responseType =  "binary",
+            responseVar= "nt_wm_any_anem",
+            regionVar = "region",
+            clusterVar = "~cluster+householdID",#+householdID same result
+            weightVar = "weight",
+            strataVar = "strata.full",
+            Amat =admin1.mat,
+            CI = 0.95)  
+```
+
+```{r}
+  fit1$HT
+```
+
+```{r}
+  fit1$smooth
+```
+
+```{r}
+fit1$HT$HT.sd <- sqrt(fit1$HT$HT.var)
+fit1$smooth$sd <- sqrt(fit1$smooth$var)
+ylim1 <- range(c(fit1$HT$HT.est, fit1$smooth$mean))
+ylim2 <- range(c(fit1$HT$HT.sd, fit1$smooth$sd))
+```
+
+```{r HT, fig.show="hold", out.width="100%"}
+g1 <- mapPlot(fit1$HT,
+          variables = "HT.est",
+          by.data = "region",
+          geo = poly.adm1,
+          by.geo = "NAME_1",
+          legend.label = "HT estimator", 
+          ylim = ylim1)
+g2 <- mapPlot(fit1$HT,
+          variables = "HT.sd",
+          by.data = "region",
+          geo = poly.adm1,
+          by.geo = "NAME_1",
+          legend.label = "HT SE", 
+          ylim = ylim2)
+
+g3 <- mapPlot(fit1$smooth,
+          variables = "mean",
+          by.data = "region",
+          geo = poly.adm1,
+          by.geo = "NAME_1",
+          legend.label = "Smooth Direct estimator", 
+          ylim = ylim1)
+
+g4 <- mapPlot(fit1$smooth,
+          variables = "sd",
+          by.data = "region",
+          geo = poly.adm1,
+          by.geo = "NAME_1",
+          legend.label = "Smooth Direct SE", 
+          ylim = ylim2)
+(g1 + g2)/(g3 + g4)
+```
+
+
+
+
+```{r}
+get_api_table <- function(coutry, survey, indicator, simplify = TRUE){
+	call <- paste0("https://api.dhsprogram.com/rest/dhs/data?breakdown=subnational&indicatorIds=", 
+			indicator, 
+			"&countryIds=",
+			country,
+			"&surveyIds=", 
+			survey, 
+			"&lang=en&f=csv")
+	tab <- read.csv(call)
+	if(simplify){
+		tab <- tab[, c("Value", "CharacteristicLabel", "ByVariableLabel")]
+	}
+	return(tab)
+}
+
+country <- "ZM"
+survey <- "ZM2018DHS"
+
+# Percentage of women who had a live birth in the five (or three) years preceding the survey who had 4+ antenatal care visits
+# tab <- get_api_table(coutry, survey, "RH_ANCN_W_N4P")
+
+
+
+```
+
+
+```{r}
+# CN_NUTS_C_HA3
+# CN_NUTS_C_HA2
+country <- "ZM"
+survey <- "ZM2018DHS"
+tab <- get_api_table(coutry, survey, "AN_ANEM_W_ANY")
+tab
+
+
+
+mapPlot(tab,
+          variables = "Value",
+          by.data = "CharacteristicLabel",
+          geo = poly.adm1,
+          by.geo = "NAME_1",
+          legend.label = "API"
+          )
+
+
+```
+
+
+
+```{r, fig.show="hold", out.width="50%"}
+
+ # par(mfrow = c(1, 3))
+dat.tmp.tem<-left_join( data.frame(NAME_1=tab$CharacteristicLabel,api=tab$Value),
+                         data.frame(NAME_1=fit1$HT$region,dir.est=fit1$HT$HT.est),by="NAME_1")
+plot(dat.tmp.tem$api/100,dat.tmp.tem$dir.est,
+     xlim=round(range(dat.tmp.tem$api/100,dat.tmp.tem$dir.es),digits = 4),
+     ylim=round(range(dat.tmp.tem$api/100,dat.tmp.tem$dir.es),digits = 4),
+     xlab = "api", ylab = "dir.est", main = "")
+abline(a = 0, b = 1, col = "red")
+
+
+dat.tmp.tem<-left_join( data.frame(NAME_1=tab$CharacteristicLabel,api=tab$Value),
+                         data.frame(NAME_1=fit1$smooth$region,smooth=fit1$smooth$mean),by="NAME_1")
+plot(dat.tmp.tem$api/100,dat.tmp.tem$smooth,
+     xlim=round(range(dat.tmp.tem$api/100,dat.tmp.tem$smooth),digits = 4),
+     ylim=round(range(dat.tmp.tem$api/100,dat.tmp.tem$smooth),digits = 4),
+     xlab = "api", ylab = "smooth", main = "")
+abline(a = 0, b = 1, col = "red")
+
+
+dat.tmp.tem<-left_join(   data.frame(NAME_1=fit1$smooth$region,smooth=fit1$smooth$mean),
+                         data.frame(NAME_1=fit1$HT$region,dir.est=fit1$HT$HT.est),by="NAME_1")
+plot(dat.tmp.tem$smooth,dat.tmp.tem$dir.est,
+     xlim=round(range(dat.tmp.tem$smooth,dat.tmp.tem$dir.es),digits = 4),
+     ylim=round(range(dat.tmp.tem$smooth,dat.tmp.tem$dir.es),digits = 4),
+     xlab = "smooth", ylab = "dir.est", main = "")
+abline(a = 0, b = 1, col = "red")
+
+
+
+```
+
+
+
+
+
+
+
+
+```{r}
+tab[order(tab$Value),][,1:2]
+fit1$HT[order(fit1$HT$HT.est),][,1:2]
+fit1$smooth[order(fit1$smooth$mean),][,1:2]
+```
+
