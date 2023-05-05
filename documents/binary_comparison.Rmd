@@ -1,0 +1,360 @@
+---
+title: "binary_comparison"
+# author: "Qianyu Dong"
+# date: "2023-04-20"
+output: html_document
+---
+
+
+
+```{r, echo=FALSE,message=FALSE, warning= FALSE}
+library(dplyr)
+library(rgdal)
+options(warn=0)
+library(spdep)
+library(SUMMER)
+library(geosphere)
+library(stringr)
+library(tidyverse)
+#devtools::install_github("ropensci/rdhs")
+library(rdhs)
+library(Hmisc)
+library(labelled)
+library(INLA)
+# libraries needed
+# library(tidyverse)  # most variable creation here uses tidyverse 
+# library(tidyselect) # used to select variables in FP_EVENTS.R
+# library(haven)      # used for Haven labeled DHS variables
+# library(labelled)   # used for Haven labeled variable creation
+# library(expss)    # for creating tables with Haven labeled data
+# library(xlsx)     # for exporting to excel
+library(naniar)   # to use replace_with_na function
+library(here)       # to get R project path
+library(patchwork) # organize ggplot2 output nicely
+```
+
+
+### Ratio comparison
+
+```{r,  echo=FALSE}
+load(file = "/Users/qianyu/Dropbox/binary_model/Results/Zambia/ModelResult/ratio.rda")
+```
+
+
+```{r,  echo=FALSE}
+
+df<-data.frame(pop_r=pop$pop_r,survey_weight_r=survey_weight$survey_weight_r)
+ggplot(df, aes(survey_weight_r,pop_r)) +
+  geom_point(alpha = 0.5,size =pop$admin2_pop/50000)+
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed")+
+    labs(title = "admin 2 survey weight ratio & 15-49 female population ratio")
+
+```
+
+Point size by admin2 population size. 
+
+
+
+
+
+### Scatter plot, results vs admin 1 direct estimate 
+
+```{r, echo=FALSE,out.width="50%",fig.width = 4, fig.height = 4}
+load(file = "/Users/qianyu/Dropbox/binary_model/Results/Zambia/ModelResult/admin1.rda")
+#admin1_dir, admin1_bbm_strata
+load(file = "/Users/qianyu/Dropbox/binary_model/Results/Zambia/ModelResult/admin2.rda")
+##dmin2_strata_agg,admin2_strata,dat.tmp.tem_HT_admin1,HT
+
+```
+
+
+
+###### admin 1 smoothed vs admin 1 direct estimate 
+
+
+```{r,echo=FALSE,out.width="50%",fig.width = 4, fig.height = 4}
+
+plot(admin1_dir$HT$HT.est,admin1_dir$smooth$mean,
+     xlim=round(range(admin1_dir$HT$HT.est,admin1_dir$smooth$mean),digits = 4),
+     ylim=round(range(admin1_dir$HT$HT.est,admin1_dir$smooth$mean),digits = 4),
+     xlab = "admin1 Direct", ylab = "admin1 Smoothed Direct", main = "estimation")
+abline(a = 0, b = 1, col = "red")
+
+
+plot((admin1_dir$HT$HT.sd),admin1_bbm_strata$sd[21:30],
+     xlab = "admin1 Direct", ylab = "admin1 Smoothed Direct", main = "SD",
+     xlim=round(range(admin1_dir$HT$HT.sd,admin1_dir$smooth$sd),digits = 4),
+     ylim=round(range(admin1_dir$HT$HT.sd,admin1_dir$smooth$sd),digits = 4)
+     )
+abline(a = 0, b = 1, col = "red")
+```
+
+
+
+
+
+##### admin1_bbm_strata vs admin 1 direct estimate 
+
+
+```{r, echo=FALSE, out.width="50%",fig.width = 4, fig.height = 4}
+
+plot(admin1_dir$HT$HT.est,admin1_bbm_strata$mean[21:30],
+     xlim=round(range(admin1_dir$HT$HT.est,admin1_bbm_strata$mean[21:30]),digits = 4),
+     ylim=round(range(admin1_dir$HT$HT.est,admin1_bbm_strata$mean[21:30]),digits = 4),
+     xlab = "admin1 Direct", ylab = "admin1 bbm strata", main = "estimation")
+abline(a = 0, b = 1, col = "red")
+
+
+plot((admin1_dir$HT$HT.sd),admin1_bbm_strata$sd[21:30],
+     xlab = "admin1 Direct", ylab = "admin1 bbm strata", main = "SD",
+     xlim=round(range(admin1_dir$HT$HT.sd,admin1_bbm_strata$sd[21:30]),digits = 4),
+     ylim=round(range(admin1_dir$HT$HT.sd,admin1_bbm_strata$sd[21:30]),digits = 4)
+     )
+abline(a = 0, b = 1, col = "red")
+```
+
+
+##### admin2 direct vs admin 1 direct estimate 
+
+
+
+```{r, echo=FALSE, out.width="50%",fig.width = 4, fig.height = 4}
+
+plot(admin1_dir$HT$HT.est,dat.tmp.tem_HT_admin1$Antenatal,
+     xlim=round(range(admin1_dir$HT$HT.est,dat.tmp.tem_HT_admin1$Antenatal),digits = 4),
+     ylim=round(range(admin1_dir$HT$HT.est,dat.tmp.tem_HT_admin1$Antenatal),digits = 4),
+     xlab = "admin1 Direct", ylab = "admin2 Direct", main = "estimation(by pop)")
+abline(a = 0, b = 1, col = "red")
+
+#
+plot(admin1_dir$HT$HT.est,dat.tmp.tem_HT_admin1_sw$Antenatal,
+     xlim=round(range(admin1_dir$HT$HT.est,dat.tmp.tem_HT_admin1_sw$Antenatal),digits = 4),
+     ylim=round(range(admin1_dir$HT$HT.est,dat.tmp.tem_HT_admin1_sw$Antenatal),digits = 4),
+     xlab = "admin1 Direct", ylab = "admin2 Direct", main = "estimation(by survey weight)")
+abline(a = 0, b = 1, col = "red")
+
+
+```
+
+
+
+##### admin2_bbm_strata vs admin 1 direct estimate 
+
+
+```{r, echo=FALSE,out.width="50%",fig.width = 4, fig.height = 4}
+library(matrixStats)
+
+ admin2_stra_tem<-  admin2_strata_agg[admin2_strata_agg$type==c("aggregated"),"mean"]
+plot(admin1_dir$HT$HT.est,admin2_stra_tem,
+     xlim=round(range(admin1_dir$HT$HT.est,admin2_stra_tem),digits = 4),
+     ylim=round(range(admin1_dir$HT$HT.est,admin2_stra_tem),digits = 4),
+     xlab = "admin1 Direct", ylab = "admin2 bbm strata", main = "estimation")
+abline(a = 0, b = 1, col = "red")
+
+
+ admin2_stra_tem<-  admin2_strata_agg[admin2_strata_agg$type==c("aggregated"),"sd"]
+plot(admin1_dir$HT$HT.sd,admin2_stra_tem,
+     xlim=round(range(admin1_dir$HT$HT.sd,admin2_stra_tem),digits = 4),
+     ylim=round(range(admin1_dir$HT$HT.sd,admin2_stra_tem),digits = 4),
+     xlab = "admin1 Direct", ylab = "admin2 bbm strata", main = "sd")
+abline(a = 0, b = 1, col = "red")
+
+```
+
+
+
+
+
+
+
+
+##### admin2_bbm_strata vs admin 2 direct estimate 
+
+
+
+```{r, echo=FALSE, warning==FALSE,out.width="50%",fig.width = 4, fig.height = 4}
+library(matrixStats)
+
+admin2_strata_tem<-admin2_strata[admin2_strata$type==c("aggregated"),"mean"]
+plot(HT$response0,admin2_strata_tem,
+     xlim=round(range(HT$response0,admin2_strata_tem,na.rm = T),digits = 4),
+     ylim=round(range(HT$response0,admin2_strata_tem,na.rm = T),digits = 4),
+     xlab = "admin 2 Direct", ylab = "admin2 bbm strata", main = "estimation")
+abline(a = 0, b = 1, col = "red")
+
+
+
+```
+
+
+
+
+
+### Line charts 
+
+
+
+
+
+```{r, echo=FALSE,fig.show="hold", out.width="50%"}
+
+fit1<-admin1_dir
+
+tb<-data.frame(region=fit1$HT$region, 
+               est.HT=fit1$HT$HT.est,
+               sd.HT=sqrt(fit1$HT$HT.var),
+               est.smth=fit1$smooth$mean,
+               sd.smth=sqrt(fit1$smooth$var),
+               # lower.smth=fit1$smooth$lower,
+               # upper.smth=fit1$smooth$upper,
+               est.bb.strat=admin1_bbm_strata$mean[21:30],
+               sd.bb.strat=admin1_bbm_strata$sd[21:30],
+               # lower.strat=admin1_bbm_strata$lbd[21:30],
+               # upper.strat=admin1_bbm_strata$ubd[21:30]
+               
+               est.HT.admin2=dat.tmp.tem_HT_admin1$Antenatal,
+               est.bb.strat.admin2=admin2_strata_agg$mean[21:30],
+               sd.bb.strat.admin2=admin2_strata_agg$sd[21:30]
+               
+               
+               )
+
+  # write.csv(tb, "zambia.anc.admin1.csv")
+
+
+tb %>%
+  pivot_longer(  cols = starts_with("est"),
+                 names_to = c("est"))%>%
+  ggplot(data=., aes(x=region, y=value, group=est)) +
+  geom_line(aes(col=est))
+
+
+tb %>%
+  pivot_longer(  cols = starts_with("sd"),
+                 names_to = c("sd"))%>%
+  ggplot(data=., aes(x=region, y=value, group=sd)) +
+  geom_line(aes(col=sd))
+
+```
+
+
+
+
+
+
+
+
+
+
+### Intervals
+
+
+```{r,warning=FALSE,echo=FALSE,fig.show="hold", out.width="50%"}
+
+# dt<-admin2_strata[admin2_strata$type==""]
+plot_fun <- function(dat) {
+  ggplot(dat, aes(x = NAME_2, y = mean)) +
+    geom_point() +
+    geom_errorbar(aes(ymin = ubd , ymax = lbd,color = type), alpha = 0.2) +
+      scale_color_manual(values = c("red", "blue", "green"))+
+
+    geom_hline(yintercept = as.numeric(admin1_dir$HT[admin1_dir$HT$region == unique(dat$NAME_1), "HT.est"]),
+               linetype = "dashed",color="red") +
+    geom_hline(yintercept = as.numeric(admin2_strata_agg[admin2_strata_agg$NAME_1 == unique(dat$NAME_1)&admin2_strata_agg$type==c("aggregated"), "mean"]),
+               linetype = "dashed",color="blue") +
+    labs(title = unique(dat$NAME_1))
+  # scale_color_manual(values = c("red", "blue"), 
+  #                    name = "Line Color", 
+  #                    labels = c("Line 1", "Line 2"),
+  #                    guide = guide_legend(override.aes = list(linetype = c("dashed", "dashed")))) +
+  # theme(legend.position = "bottom")
+}
+
+# Loop over unique values of admin1.names
+plots <- lapply(unique(admin2_strata$NAME_1), function(x) {
+  dat <- admin2_strata %>% filter(NAME_1 == x)
+  plot_fun(dat)
+})
+
+plots
+
+
+```
+
+Blue lines are admin2 strata model results and red lines are admin1 direct estimates.
+
+
+
+
+
+### natinal
+
+```{r}
+country<-"Zambia"
+home.dir<-"/Users/qianyu/Dropbox/binary_model"
+data.dir <- paste0(home.dir,'/data/',country) # set the directory to store the data
+res.dir <- paste0(home.dir,'/Results/',country) # set the directory to store the results (e.g. fitted R objects, figures, tables in .csv etc.)
+info.name <- paste0(country, "_general_info.Rdata")
+load(file = paste0(home.dir,'/data/Info/',info.name, sep='')) # load the country info
+# admin2_pop<-readRDS(file=paste0(res.dir,'/UR/Uf_fraction/admin2_uf_2018_urban_frac.rds'))
+admin1_pop<-readRDS(file=paste0(res.dir,'/UR/Uf_fraction/admin1_uf_2018_urban_frac.rds'))
+nat_pop<-readRDS(file=paste0(res.dir,'/UR/Uf_fraction/natl_uf_urban_pop.rds'))
+
+```
+
+```{r}
+# 
+# admin1_wei<-readRDS(file=paste0(res.dir,'/UR/Uf_fraction/admin1_uf_urban_weights.rds'))
+# admin1_wei
+```
+
+
+```{r}
+# nat_pop
+# sum(admin1_pop$total.c)
+# admin1_pop
+```
+
+```{r}
+dat.tmp.tem<-left_join(data.frame(NAME_1=admin1_pop$adm_name,pop=admin1_pop$total.c),
+        data.frame(NAME_1=admin1_dir$HT$region,est=admin1_dir$HT$HT.est),by="NAME_1")
+national.agg_admin1_direct<-  sum(dat.tmp.tem$pop/sum(dat.tmp.tem$pop)*dat.tmp.tem$est)
+national.agg_admin1_direct 
+```
+
+
+```{r}
+dat.tmp.tem<-left_join(data.frame(NAME_1=admin1_pop$adm_name,pop=admin1_pop$total.c),
+        data.frame(NAME_1=admin1_dir$HT$region,est=tb$est.smth),by="NAME_1")
+national.agg_admin1_smt.dir<-  sum(dat.tmp.tem$pop/sum(dat.tmp.tem$pop)*dat.tmp.tem$est)
+national.agg_admin1_smt.dir 
+```
+
+
+```{r}
+dat.tmp.tem<-left_join(data.frame(NAME_1=admin1_pop$adm_name,pop=admin1_pop$total.c),
+        data.frame(NAME_1=admin1_dir$HT$region,est=tb$est.bb.strat),by="NAME_1")
+national.agg_admin1_bb.strat<-  sum(dat.tmp.tem$pop/sum(dat.tmp.tem$pop)*dat.tmp.tem$est)
+national.agg_admin1_bb.strat
+```
+
+
+
+```{r}
+
+dat.tmp.tem<-left_join(data.frame(NAME_1=admin1_pop$adm_name,pop=admin1_pop$total.c),
+        data.frame(NAME_1=admin1_dir$HT$region,est=tb$est.HT.admin2),by="NAME_1")
+national.agg_admin2_direct<-  sum(dat.tmp.tem$pop/sum(dat.tmp.tem$pop)*dat.tmp.tem$est)
+national.agg_admin2_direct
+```
+
+
+```{r}
+
+dat.tmp.tem<-left_join(data.frame(NAME_1=admin1_pop$adm_name,pop=admin1_pop$total.c),
+        data.frame(NAME_1=admin1_dir$HT$region,est=tb$est.bb.strat.admin2),by="NAME_1")
+national.agg_admin2_bb.strat<-  sum(dat.tmp.tem$pop/sum(dat.tmp.tem$pop)*dat.tmp.tem$est)
+national.agg_admin2_bb.strat
+```
+
+
